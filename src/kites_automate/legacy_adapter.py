@@ -1,28 +1,12 @@
-import importlib
 import logging
 import os
+import subprocess
 import sys
-from contextlib import contextmanager
 from typing import Optional
 
 from .config import RuntimeContext
 
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _pushd(path: str):
-    prev = os.getcwd()
-    os.chdir(path)
-    try:
-        yield
-    finally:
-        os.chdir(prev)
-
-
-def _ensure_path_on_sys(path: str):
-    if path not in sys.path:
-        sys.path.insert(0, path)
 
 
 def run_legacy(ctx: RuntimeContext) -> None:
@@ -35,47 +19,82 @@ def run_legacy(ctx: RuntimeContext) -> None:
     module_name = legacy.module_name or "main"
     mode = (legacy.mode or "smart").lower()
 
-    _ensure_path_on_sys(project_path)
+    if not os.path.exists(project_path):
+        logger.error("Legacy project path does not exist: %s", project_path)
+        return
 
-    # Optionally load env file in legacy project
+    # Look for venv in legacy project
+    venv_python = os.path.join(project_path, ".venv", "bin", "python")
+    if not os.path.exists(venv_python):
+        venv_python = "python3"  # fallback to system python
+        logger.warning("Legacy venv not found, using system python")
+
+    # Set up environment
+    env = os.environ.copy()
     if legacy.env_file and os.path.exists(legacy.env_file):
+        # Load env vars from legacy .env file
         try:
-            from dotenv import load_dotenv  # type: ignore
-            load_dotenv(dotenv_path=legacy.env_file, override=False)
+            from dotenv import dotenv_values
+            env_vars = dotenv_values(legacy.env_file)
+            for key, value in env_vars.items():
+                if key and value:
+                    env[key] = value
         except Exception as exc:
             logger.warning("Could not load legacy env file: %s", exc)
 
-    with _pushd(project_path):
-        mod = importlib.import_module(module_name)
-        if mode == "smart":
-            fn = getattr(mod, "smart_update")
-            fn()
-        elif mode == "minimal":
-            fn = getattr(mod, "minimal_update")
-            fn()
-        elif mode == "force_format":
-            # Some flows prompt; stub input to "y"
-            import builtins
-            old_input = builtins.input
-            try:
-                builtins.input = lambda *_: "y"  # type: ignore
-                fn = getattr(mod, "force_format")
-                fn()
-            finally:
-                builtins.input = old_input
-        elif mode == "show_status":
-            fn = getattr(mod, "show_status")
-            fn()
-        elif mode == "reset_state":
-            import builtins
-            old_input = builtins.input
-            try:
-                builtins.input = lambda *_: "y"  # type: ignore
-                fn = getattr(mod, "reset_formatting_state")
-                fn()
-            finally:
-                builtins.input = old_input
-        else:
-            raise ValueError(f"Unknown legacy mode: {mode}")
+    # Map mode to function call
+    function_map = {
+        "smart": "smart_update()",
+        "minimal": "minimal_update()",
+        "force_format": "force_format()",
+        "show_status": "show_status()",
+        "reset_state": "reset_formatting_state()"
+    }
+    
+    if mode not in function_map:
+        raise ValueError(f"Unknown legacy mode: {mode}")
 
-    logger.info("Legacy run completed (mode=%s)", mode)
+    function_call = function_map[mode]
+    
+    # For functions that need input stubbing, prepare the input
+    python_code = f"""
+import sys
+sys.path.insert(0, '{project_path}')
+
+# Stub input for interactive functions
+if '{mode}' in ['force_format', 'reset_state']:
+    import builtins
+    builtins.input = lambda *_: 'y'
+
+import {module_name}
+{module_name}.{function_call}
+"""
+
+    try:
+        result = subprocess.run(
+            [venv_python, "-c", python_code],
+            cwd=project_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+        if result.returncode != 0:
+            logger.error("Legacy run failed with code %d: %s", result.returncode, result.stderr)
+            raise RuntimeError(f"Legacy execution failed: {result.stderr}")
+        
+        if result.stdout:
+            # Log legacy output at info level
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    logger.info("Legacy: %s", line.strip())
+                    
+        logger.info("Legacy run completed (mode=%s)", mode)
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Legacy run timed out after 5 minutes")
+        raise RuntimeError("Legacy execution timed out")
+    except Exception as exc:
+        logger.error("Legacy run failed: %s", exc)
+        raise
