@@ -122,23 +122,8 @@ import {module_name}
                 if line.strip():
                     logger.info("Legacy: %s", line.strip())
         
-        # Send success email notification
-        try:
-            from datetime import datetime
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            email_tpl = """
-            <h2>✅ Portfolio Update Completed Successfully</h2>
-            <p><strong>Timestamp:</strong> {{ts}}</p>
-            <p><strong>Mode:</strong> {{mode}}</p>
-            <p>All portfolios have been processed successfully via legacy integration.</p>
-            <p>Check your Google Sheets for the latest portfolio data.</p>
-            """
-            send_email(ctx, 
-                      subject="✅ Kites Portfolio Update Completed", 
-                      template_str=email_tpl, 
-                      context={"ts": now_str, "mode": mode})
-        except Exception as exc:
-            logger.warning("Failed to send success email: %s", exc)
+        # Success email is handled by portfolio updater to avoid duplicates
+        logger.info("Legacy integration completed successfully")
                     
         logger.info("Legacy run completed (mode=%s)", mode)
         
