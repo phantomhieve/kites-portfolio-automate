@@ -24,14 +24,14 @@ import threading
 try:
     from selenium import webdriver
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.service import Service
     import pyotp
 except ImportError as e:
-    raise ImportError(f"Missing dependencies for full automation: {e}. Run: pip install selenium pyotp webdriver-manager")
+    raise ImportError(f"Missing dependencies for full automation: {e}. Run: pip install selenium pyotp")
 
 from .webhook_server import TokenWebhookServer
 
@@ -120,25 +120,43 @@ class FullyAutomatedKiteAuth:
             logger.error("Error generating TOTP for %s: %s", self.profile_name, exc)
             return None
     
-    def _setup_webdriver(self) -> webdriver.Chrome:
-        """Setup Chrome webdriver with appropriate options."""
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Run in background
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--disable-images")  # Faster loading
+    def _setup_webdriver(self) -> webdriver.Firefox:
+        """Setup Firefox webdriver with appropriate options."""
+        firefox_options = Options()
+        firefox_options.add_argument("--headless")  # Re-enable headless for speed
+        firefox_options.add_argument("--width=1920")
+        firefox_options.add_argument("--height=1080")
         
-        # Install and setup ChromeDriver automatically
-        service = Service(ChromeDriverManager().install())
+        # Performance optimizations
+        firefox_options.set_preference("dom.webdriver.enabled", False)
+        firefox_options.set_preference("useAutomationExtension", False)
+        firefox_options.set_preference("permissions.default.image", 2)  # Disable images
+        firefox_options.set_preference("permissions.default.stylesheet", 2)  # Disable CSS
+        firefox_options.set_preference("permissions.default.plugin", 2)  # Disable plugins
+        firefox_options.set_preference("javascript.enabled", True)  # Keep JS for form submission
+        firefox_options.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
+        firefox_options.set_preference("media.volume_scale", "0.0")  # Mute audio
+        firefox_options.set_preference("network.http.pipelining", True)
+        firefox_options.set_preference("network.http.pipelining.maxrequests", 8)
+        firefox_options.set_preference("content.notify.interval", 500000)
+        firefox_options.set_preference("content.notify.ontimer", True)
+        firefox_options.set_preference("content.switch.threshold", 500000)
+        firefox_options.set_preference("browser.cache.disk.enable", False)
+        firefox_options.set_preference("browser.cache.memory.enable", False)
+        firefox_options.set_preference("browser.cache.offline.enable", False)
+        firefox_options.set_preference("network.http.use-cache", False)
         
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.implicitly_wait(10)
-        
-        return driver
+        # Use system geckodriver (installed via Homebrew)
+        try:
+            # Suppress geckodriver logs
+            service = Service("/opt/homebrew/bin/geckodriver", log_output=os.devnull)
+            driver = webdriver.Firefox(service=service, options=firefox_options)
+            driver.implicitly_wait(1)  # Fast: 1 second only
+            return driver
+            
+        except Exception as exc:
+            logger.error("Firefox webdriver setup failed: %s", exc)
+            raise
     
     def _automated_browser_login(self, login_url: str, timeout: int = 120) -> Optional[str]:
         """Perform fully automated browser login and capture request token."""
@@ -160,16 +178,63 @@ class FullyAutomatedKiteAuth:
             logger.info("Navigated to login page for %s", self.profile_name)
             
             # Wait for login form and fill credentials
-            wait = WebDriverWait(driver, 20)
+            wait = WebDriverWait(driver, 3)  # Fast: 3 seconds max
             
-            # Fill username
-            username_field = wait.until(EC.presence_of_element_located((By.NAME, "user_id")))
+            # Check page loaded correctly
+            logger.info("Login page loaded: %s", driver.title)
+            
+            # Try different possible username field selectors (optimized order)
+            username_field = None
+            username_selectors = [
+                (By.ID, "userid"),  # WINNER from logs - try first!
+                (By.NAME, "user_id"),
+                (By.NAME, "userid"),
+                (By.ID, "user_id"),
+                (By.NAME, "username"),
+                (By.ID, "username")
+            ]
+            
+            for selector_type, selector_value in username_selectors:
+                try:
+                    username_field = WebDriverWait(driver, 0.5).until(EC.presence_of_element_located((selector_type, selector_value)))
+                    logger.info("Found username field using %s: %s", selector_type, selector_value)
+                    break
+                except Exception:
+                    continue
+            
+            if not username_field:
+                logger.error("Could not find username field on page")
+                # Take screenshot for debugging
+                driver.save_screenshot("/tmp/zerodha_login_debug.png")
+                logger.info("Debug screenshot saved to /tmp/zerodha_login_debug.png")
+                raise Exception("Username field not found")
+            
             username_field.clear()
             username_field.send_keys(self.username)
             logger.info("Username entered for %s", self.profile_name)
             
-            # Fill password
-            password_field = driver.find_element(By.NAME, "password")
+            # Fill password - optimized order
+            password_field = None
+            password_selectors = [
+                (By.ID, "password"),  # WINNER from logs - try first!
+                (By.NAME, "password"),
+                (By.XPATH, "//input[@type='password']")
+            ]
+            
+            for selector_type, selector_value in password_selectors:
+                try:
+                    password_field = driver.find_element(selector_type, selector_value)
+                    logger.info("Found password field using %s: %s", selector_type, selector_value)
+                    break
+                except Exception:
+                    continue
+            
+            if not password_field:
+                logger.error("Could not find password field on page")
+                driver.save_screenshot("/tmp/zerodha_password_debug.png")
+                logger.info("Debug screenshot saved to /tmp/zerodha_password_debug.png")
+                raise Exception("Password field not found")
+            
             password_field.clear()
             password_field.send_keys(self.password)
             logger.info("Password entered for %s", self.profile_name)
@@ -182,20 +247,64 @@ class FullyAutomatedKiteAuth:
             # Handle 2FA if TOTP secret is provided
             if self.totp_secret:
                 try:
-                    # Wait for 2FA page
-                    totp_field = wait.until(EC.presence_of_element_located((By.NAME, "totp")))
+                    logger.info("Waiting for 2FA page for %s", self.profile_name)
+                    
+                    # Wait for 2FA page to load
+                    time.sleep(0.5)  # Very fast
+                    
+                    # Try TOTP field selectors - optimized order
+                    totp_field = None
+                    totp_selectors = [
+                        (By.XPATH, "//input[@maxlength='6']"),  # WINNER from logs - try first!
+                        (By.NAME, "totp"),
+                        (By.ID, "totp"),
+                        (By.CSS_SELECTOR, "input[autocomplete='one-time-code']")
+                    ]
+                    
+                    for selector_type, selector_value in totp_selectors:
+                        try:
+                            totp_field = WebDriverWait(driver, 0.5).until(EC.presence_of_element_located((selector_type, selector_value)))
+                            logger.info("Found TOTP field using %s: %s", selector_type, selector_value)
+                            break
+                        except Exception:
+                            continue
+                    
+                    if not totp_field:
+                        logger.error("Could not find TOTP field on 2FA page")
+                        driver.save_screenshot("/tmp/zerodha_2fa_debug.png")
+                        logger.info("2FA debug screenshot saved to /tmp/zerodha_2fa_debug.png")
+                        raise Exception("TOTP field not found")
                     
                     # Generate and enter TOTP
                     totp_code = self._generate_totp()
                     if totp_code:
                         totp_field.clear()
                         totp_field.send_keys(totp_code)
-                        logger.info("TOTP entered for %s", self.profile_name)
+                        logger.info("✅ TOTP code entered for %s", self.profile_name)
                         
-                        # Submit 2FA
-                        totp_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
-                        totp_submit.click()
-                        logger.info("2FA submitted for %s", self.profile_name)
+                        # Try submit button selectors - optimized order
+                        submit_button = None
+                        submit_selectors = [
+                            (By.XPATH, "//button[@type='submit']"),  # WINNER from logs - try first!
+                            (By.CSS_SELECTOR, "button[type='submit']"),
+                            (By.XPATH, "//input[@type='submit']")
+                        ]
+                        
+                        for selector_type, selector_value in submit_selectors:
+                            try:
+                                submit_button = driver.find_element(selector_type, selector_value)
+                                logger.info("Found submit button using %s: %s", selector_type, selector_value)
+                                break
+                            except Exception:
+                                continue
+                        
+                        if submit_button:
+                            submit_button.click()
+                            logger.info("2FA submitted for %s", self.profile_name)
+                        else:
+                            logger.warning("Could not find submit button, trying Enter key")
+                            totp_field.send_keys(Keys.RETURN)
+                            logger.info("2FA submitted via Enter key for %s", self.profile_name)
                     else:
                         logger.warning("Failed to generate TOTP for %s", self.profile_name)
                         
@@ -204,20 +313,51 @@ class FullyAutomatedKiteAuth:
             
             # Wait for OAuth authorization page and approve
             try:
-                # Look for authorization/approve button
-                approve_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Authorise') or contains(text(), 'Approve') or contains(text(), 'Allow')]")))
-                approve_button.click()
-                logger.info("OAuth authorization approved for %s", self.profile_name)
+                logger.info("Waiting for OAuth authorization page for %s", self.profile_name)
+                time.sleep(0.5)  # Minimal wait for page transition
+                
+                # Try multiple selectors for authorization button
+                approve_button = None
+                approve_selectors = [
+                    (By.XPATH, "//button[contains(text(), 'Authorise')]"),
+                    (By.XPATH, "//button[contains(text(), 'Authorize')]"),
+                    (By.XPATH, "//button[contains(text(), 'Approve')]"),
+                    (By.XPATH, "//button[contains(text(), 'Allow')]"),
+                    (By.XPATH, "//button[contains(text(), 'Continue')]"),
+                    (By.XPATH, "//input[@type='submit' and contains(@value, 'Authorise')]"),
+                    (By.XPATH, "//input[@type='submit' and contains(@value, 'Approve')]"),
+                    (By.CSS_SELECTOR, "button.btn-primary"),
+                    (By.CSS_SELECTOR, ".authorize-btn"),
+                    (By.CSS_SELECTOR, ".approve-btn"),
+                    (By.XPATH, "//button[@type='submit']")
+                ]
+                
+                for selector_type, selector_value in approve_selectors:
+                    try:
+                        approve_button = WebDriverWait(driver, 0.5).until(EC.element_to_be_clickable((selector_type, selector_value)))
+                        logger.info("Found approval button using %s: %s", selector_type, selector_value)
+                        break
+                    except Exception:
+                        continue
+                
+                if approve_button:
+                    approve_button.click()
+                    logger.info("OAuth authorization approved for %s", self.profile_name)
+                else:
+                    logger.warning("Could not find OAuth approval button for %s", self.profile_name)
+                    driver.save_screenshot("/tmp/zerodha_oauth_debug.png")
+                    logger.info("OAuth debug screenshot saved to /tmp/zerodha_oauth_debug.png")
+                    
             except Exception as exc:
                 logger.warning("OAuth approval failed for %s: %s", self.profile_name, exc)
             
-            # Wait for webhook to capture token
+            # Wait for webhook to capture token (reduced timeout since OAuth often auto-approves)
             logger.info("Waiting for OAuth redirect capture for %s", self.profile_name)
-            token_data = server.wait_for_token(timeout=60)
+            token_data = server.wait_for_token(timeout=10)  # Reduced from 60 to 10 seconds
             
             if token_data and token_data.get('request_token'):
                 request_token = token_data['request_token']
-                logger.info("Request token captured for %s: %s...", self.profile_name, request_token[:10])
+                logger.info("✅ Request token captured successfully for %s", self.profile_name)
                 return request_token
             else:
                 logger.error("Failed to capture request token for %s", self.profile_name)
@@ -240,10 +380,7 @@ class FullyAutomatedKiteAuth:
 import sys
 import os
 
-# Add legacy project to path
-legacy_path = os.path.expanduser("~/apps/kites-portfolio-tracker")
-if legacy_path not in sys.path:
-    sys.path.insert(0, legacy_path)
+# kiteconnect is now installed in current venv
 
 from kiteconnect import KiteConnect
 
@@ -259,14 +396,13 @@ except Exception as e:
     sys.exit(1)
 """
             
-            # Run in legacy project's venv
-            legacy_venv_python = os.path.expanduser("~/apps/kites-portfolio-tracker/.venv/bin/python")
-            if not os.path.exists(legacy_venv_python):
-                legacy_venv_python = "python3"
+            # Use current venv (has kiteconnect installed)
+            import sys
+            current_python = sys.executable
             
             result = subprocess.run(
-                [legacy_venv_python, "-c", python_code],
-                cwd=os.path.expanduser("~/apps/kites-portfolio-tracker"),
+                [current_python, "-c", python_code],
+                cwd=os.getcwd(),
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -387,8 +523,8 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
             else:
                 logger.error("❌ Fully automated renewal failed for %s", profile_name)
             
-            # Delay between profiles to avoid rate limiting
-            time.sleep(5)
+            # Reduced delay between profiles
+            time.sleep(1)
             
     except Exception as exc:
         logger.error("Fully automated token renewal failed: %s", exc)
