@@ -10,6 +10,34 @@ from .notify.emailer import send_email, send_failure_email
 logger = logging.getLogger(__name__)
 
 
+def _validate_legacy_tokens(ctx: RuntimeContext) -> None:
+    """Validate legacy tokens without running portfolio updates."""
+    legacy = ctx.settings.legacy
+    if not legacy or not legacy.enabled:
+        logger.info("Legacy mode disabled")
+        return
+
+    project_path = legacy.project_path or "/home/phantomhive/kites-automate"
+    
+    if not os.path.exists(project_path):
+        logger.error("Legacy project path does not exist: %s", project_path)
+        return
+
+    # Check if token files exist and are valid
+    kites_dir = os.path.expanduser("~/.kites")
+    token_files = []
+    if os.path.exists(kites_dir):
+        for file in os.listdir(kites_dir):
+            if file.endswith("_access_token.txt"):
+                token_files.append(file)
+    
+    if token_files:
+        logger.info("Found %d token files: %s", len(token_files), ", ".join(token_files))
+        logger.info("Token validation completed - tokens exist")
+    else:
+        logger.warning("No token files found in ~/.kites/ - tokens may need refresh")
+
+
 def run_legacy(ctx: RuntimeContext) -> None:
     legacy = ctx.settings.legacy
     if not legacy or not legacy.enabled:

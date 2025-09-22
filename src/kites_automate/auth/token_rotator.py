@@ -87,16 +87,28 @@ def rotate_token(ctx: RuntimeContext, account: Optional[AccountConfig] = None) -
     return access_token
 
 
-def rotate_all_tokens(ctx: RuntimeContext) -> None:
-    # Legacy path: run legacy project to ensure tokens exist; it also updates sheets.
+def rotate_all_tokens(ctx: RuntimeContext, token_only: bool = False) -> None:
+    # Legacy path: run legacy project to ensure tokens exist
     if ctx.settings.legacy and ctx.settings.legacy.enabled:
-        logger.info("Rotating tokens via legacy project")
-        try:
-            run_legacy(ctx)
-        except Exception as exc:
-            details = f"Legacy token rotation failed\nError: {exc}"
-            logger.exception("Legacy token rotation failed")
-            send_failure_email(ctx, subject="Kites token rotation failed", details=details)
+        if token_only:
+            logger.info("Token-only rotation: checking token validity without portfolio updates")
+            # For token-only mode, we just validate existing tokens without running legacy updates
+            # This prevents unnecessary portfolio updates during token rotation
+            try:
+                from ..legacy_adapter import _validate_legacy_tokens
+                _validate_legacy_tokens(ctx)
+            except Exception as exc:
+                details = f"Legacy token validation failed\nError: {exc}"
+                logger.exception("Legacy token validation failed")
+                send_failure_email(ctx, subject="Kites token validation failed", details=details)
+        else:
+            logger.info("Rotating tokens via legacy project")
+            try:
+                run_legacy(ctx)
+            except Exception as exc:
+                details = f"Legacy token rotation failed\nError: {exc}"
+                logger.exception("Legacy token rotation failed")
+                send_failure_email(ctx, subject="Kites token rotation failed", details=details)
         return
 
     base = ctx.settings
