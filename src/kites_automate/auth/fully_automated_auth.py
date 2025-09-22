@@ -146,17 +146,27 @@ class FullyAutomatedKiteAuth:
         firefox_options.set_preference("browser.cache.offline.enable", False)
         firefox_options.set_preference("network.http.use-cache", False)
         
-        # Use system geckodriver (installed via Homebrew)
-        try:
-            # Suppress geckodriver logs
-            service = Service("/opt/homebrew/bin/geckodriver", log_output=os.devnull)
-            driver = webdriver.Firefox(service=service, options=firefox_options)
-            driver.implicitly_wait(1)  # Fast: 1 second only
-            return driver
-            
-        except Exception as exc:
-            logger.error("Firefox webdriver setup failed: %s", exc)
-            raise
+        # Use system geckodriver (try multiple paths for cross-platform)
+        geckodriver_paths = [
+            "/opt/homebrew/bin/geckodriver",  # macOS Homebrew
+            "/usr/local/bin/geckodriver",     # Linux manual install
+            "/usr/bin/geckodriver",           # Linux package manager
+            "geckodriver"                     # System PATH
+        ]
+        
+        for driver_path in geckodriver_paths:
+            try:
+                # Suppress geckodriver logs
+                service = Service(driver_path, log_output=os.devnull)
+                driver = webdriver.Firefox(service=service, options=firefox_options)
+                driver.implicitly_wait(1)  # Fast: 1 second only
+                return driver
+            except Exception as exc:
+                logger.debug("Geckodriver path failed %s: %s", driver_path, exc)
+                continue
+        
+        logger.error("All geckodriver paths failed")
+        raise Exception("Could not initialize Firefox webdriver")
     
     def _automated_browser_login(self, login_url: str, timeout: int = 120) -> Optional[str]:
         """Perform fully automated browser login and capture request token."""
