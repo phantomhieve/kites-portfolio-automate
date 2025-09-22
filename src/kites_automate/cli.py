@@ -37,7 +37,7 @@ def main() -> int:
         start_scheduler(ctx)
         return 0
     if args.command == "rotate-tokens":
-        rotate_all_tokens(ctx)
+        rotate_all_tokens(ctx, token_only=True)
         return 0
     if args.command == "send-test-email":
         ts = datetime.now(timezone.utc).isoformat()
