@@ -5,6 +5,7 @@ import sys
 from typing import Optional
 
 from .config import RuntimeContext
+from .notify.emailer import send_email, send_failure_email
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ import {module_name}
         
         if result.returncode != 0:
             logger.error("Legacy run failed with code %d: %s", result.returncode, result.stderr)
+            send_failure_email(ctx, 
+                              subject="❌ Kites Portfolio Update Failed", 
+                              details=f"Legacy execution failed with code {result.returncode}:\n\n{result.stderr}")
             raise RuntimeError(f"Legacy execution failed: {result.stderr}")
         
         if result.stdout:
@@ -89,12 +93,36 @@ import {module_name}
             for line in result.stdout.strip().split('\n'):
                 if line.strip():
                     logger.info("Legacy: %s", line.strip())
+        
+        # Send success email notification
+        try:
+            from datetime import datetime
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            email_tpl = """
+            <h2>✅ Portfolio Update Completed Successfully</h2>
+            <p><strong>Timestamp:</strong> {{ts}}</p>
+            <p><strong>Mode:</strong> {{mode}}</p>
+            <p>All portfolios have been processed successfully via legacy integration.</p>
+            <p>Check your Google Sheets for the latest portfolio data.</p>
+            """
+            send_email(ctx, 
+                      subject="✅ Kites Portfolio Update Completed", 
+                      template_str=email_tpl, 
+                      context={"ts": now_str, "mode": mode})
+        except Exception as exc:
+            logger.warning("Failed to send success email: %s", exc)
                     
         logger.info("Legacy run completed (mode=%s)", mode)
         
     except subprocess.TimeoutExpired:
         logger.error("Legacy run timed out after 5 minutes")
+        send_failure_email(ctx, 
+                          subject="❌ Kites Portfolio Update Timeout", 
+                          details="Legacy execution timed out after 5 minutes")
         raise RuntimeError("Legacy execution timed out")
     except Exception as exc:
         logger.error("Legacy run failed: %s", exc)
+        send_failure_email(ctx, 
+                          subject="❌ Kites Portfolio Update Failed", 
+                          details=f"Legacy execution failed: {str(exc)}")
         raise
