@@ -1,7 +1,8 @@
 import argparse
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .config import AppSettings, RuntimeContext
 from .logging_setup import setup_logging
@@ -76,10 +77,10 @@ def main() -> int:
             print(f"❌ Automated renewal failed: {exc}")
             return 1
     if args.command == "send-test-email":
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         template = """
         <p>This is a test email from kites-automate.</p>
-        <p>Timestamp (UTC): {{ ts }}</p>
+        <p>Timestamp (IST): {{ ts }}</p>
         """
         send_email(ctx, subject="Kites Automate Test Email", template_str=template, context={"ts": ts})
         return 0

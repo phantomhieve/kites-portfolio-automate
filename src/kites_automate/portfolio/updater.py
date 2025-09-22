@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from ..config import RuntimeContext, AppSettings, AccountConfig
@@ -34,16 +35,16 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
         adapter = get_adapter(local_ctx)
         adapter.update_portfolio(local_ctx, token)
 
-        now_str = datetime.now(timezone.utc).isoformat()
-        logger.info("Portfolio updated successfully for %s at %s", account.name if account else "default", now_str)
+        ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        logger.info("Portfolio updated successfully for %s at %s IST", account.name if account else "default", ist_now)
 
         email_tpl = """
         <p>Portfolio update completed.</p>
         <p>Account: {{ account }}</p>
-        <p>Timestamp (UTC): {{ ts }}</p>
+        <p>Timestamp (IST): {{ ts }}</p>
         """
         try:
-            send_email(local_ctx, subject="Kites portfolio updated", template_str=email_tpl, context={"ts": now_str, "account": account.name if account else "default"})
+            send_email(local_ctx, subject="Kites portfolio updated", template_str=email_tpl, context={"ts": ist_now, "account": account.name if account else "default"})
         except Exception as exc:
             logger.warning("Failed sending notification email for %s: %s", account.name if account else "default", exc)
     except Exception as exc:
@@ -76,17 +77,17 @@ def update_portfolio_once(ctx: RuntimeContext) -> None:
     
     # Send single summary email after all updates
     if base.legacy and base.legacy.enabled and success_count > 0:
-        now_str = datetime.now(timezone.utc).isoformat()
+        ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         email_tpl = """
         <h2>✅ Portfolio Updates Completed</h2>
         <p><strong>Successful:</strong> {{ success_count }}/{{ total_count }} accounts</p>
-        <p><strong>Timestamp:</strong> {{ ts }}</p>
+        <p><strong>Timestamp (IST):</strong> {{ ts }}</p>
         <p>All portfolio data has been updated successfully.</p>
         <p>Check your Google Sheets for the latest data.</p>
         """
         try:
             send_email(ctx, subject="✅ Kites Portfolio Updates Completed", template_str=email_tpl, 
-                      context={"ts": now_str, "success_count": str(success_count), "total_count": str(total_count)})
+                      context={"ts": ist_now, "success_count": str(success_count), "total_count": str(total_count)})
             logger.info("Summary notification sent: %d/%d accounts successful", success_count, total_count)
         except Exception as exc:
             logger.warning("Failed sending summary email: %s", exc)
