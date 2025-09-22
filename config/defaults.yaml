@@ -1,0 +1,39 @@
+kites:
+  base_url: ""
+  username: ""
+  password: ""
+  api_key: ""
+  client_id: ""
+  client_secret: ""
+
+schedule:
+  day_of_month: 15
+  hour: 6
+  minute: 0
+  timezone: "UTC"
+
+email:
+  smtp_host: ""
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  email_from: ""
+  email_to: ""
+  use_tls: true
+
+# Optional: define multiple accounts with overrides
+accounts:
+  - name: accountA
+    base_url: ""
+    api_key: ""
+    email_to: ""
+  - name: accountB
+    client_id: ""
+    client_secret: ""
+
+legacy:
+  enabled: false
+  project_path: "/Users/phantomhive/Desktop/Atul/kites"
+  module_name: "main"
+  mode: "smart"  # smart|minimal|force_format|show_status|reset_state
+  env_file: "/Users/phantomhive/Desktop/Atul/kites/.env"
