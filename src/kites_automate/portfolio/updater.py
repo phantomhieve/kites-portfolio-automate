@@ -15,10 +15,13 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
     local_ctx = RuntimeContext(settings=effective_settings)
 
     try:
-        # Legacy mode: run existing project flow and return
+        # Legacy mode: run existing project flow and send success notification
         if effective_settings.legacy and effective_settings.legacy.enabled:
             logger.info("Running legacy project for %s", account.name if account else "default")
             run_legacy(local_ctx)
+            
+            # Legacy run completed - summary email will be sent by update_portfolio_once()
+            logger.info("Legacy run completed for %s", account.name if account else "default")
             return
 
         token = get_valid_token(local_ctx, account)
@@ -51,9 +54,39 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
 
 def update_portfolio_once(ctx: RuntimeContext) -> None:
     base = ctx.settings
+    success_count = 0
+    total_count = 0
+    
     if base.accounts:
+        total_count = len(base.accounts)
         for acct in base.accounts:
             eff = AppSettings.build_settings_for_account(base, acct)
-            _update_single(ctx, eff, acct)
+            try:
+                _update_single(ctx, eff, acct)
+                success_count += 1
+            except Exception as exc:
+                logger.error("Update failed for %s: %s", acct.name, exc)
     else:
-        _update_single(ctx, base, None)
+        total_count = 1
+        try:
+            _update_single(ctx, base, None)
+            success_count += 1
+        except Exception as exc:
+            logger.error("Update failed: %s", exc)
+    
+    # Send single summary email after all updates
+    if base.legacy and base.legacy.enabled and success_count > 0:
+        now_str = datetime.now(timezone.utc).isoformat()
+        email_tpl = """
+        <h2>✅ Portfolio Updates Completed</h2>
+        <p><strong>Successful:</strong> {{ success_count }}/{{ total_count }} accounts</p>
+        <p><strong>Timestamp:</strong> {{ ts }}</p>
+        <p>All portfolio data has been updated successfully.</p>
+        <p>Check your Google Sheets for the latest data.</p>
+        """
+        try:
+            send_email(ctx, subject="✅ Kites Portfolio Updates Completed", template_str=email_tpl, 
+                      context={"ts": now_str, "success_count": str(success_count), "total_count": str(total_count)})
+            logger.info("Summary notification sent: %d/%d accounts successful", success_count, total_count)
+        except Exception as exc:
+            logger.warning("Failed sending summary email: %s", exc)
