@@ -23,13 +23,9 @@ email:
 
 # Optional: define multiple accounts with overrides
 accounts:
-  - name: accountA
-    base_url: ""
-    api_key: ""
-    email_to: ""
-  - name: accountB
-    client_id: ""
-    client_secret: ""
+  - name: Account1
+  - name: Account2
+  - name: Account3
 
 legacy:
   enabled: false
