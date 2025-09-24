@@ -114,10 +114,13 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 sheet_manager = SheetManager(credentials_path)
                 
                 # Create KiteAuthManager and get client
+                # Use the token file name that matches the automated token generation
+                # The automated auth creates tokens as {profile_name}_access_token.txt (preserving case)
+                token_file = f"{account_name}_access_token.txt"
                 kite_auth = KiteAuthManager(
                     api_key,
                     api_secret,
-                    current_account["token_file"]
+                    token_file
                 )
                 kite = kite_auth.get_client()
                 
