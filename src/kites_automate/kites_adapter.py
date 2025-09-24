@@ -75,6 +75,13 @@ def get_adapter(ctx: RuntimeContext) -> BaseKitesAdapter:
         importlib.import_module(module_name)
         logger.info("Using LocalKitesAdapter (%s.%s)", module_name, client_class)
         return LocalKitesAdapter(module_name=module_name, client_class=client_class)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Failed to load local client (path=%s, module=%s, class=%s): %s",
+            local_path,
+            module_name,
+            client_class,
+            exc,
+        )
         logger.info("Falling back to RestKitesAdapter")
         return RestKitesAdapter()
