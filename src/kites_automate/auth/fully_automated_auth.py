@@ -123,7 +123,8 @@ class FullyAutomatedKiteAuth:
     def _setup_webdriver(self) -> webdriver.Firefox:
         """Setup Firefox webdriver with appropriate options."""
         firefox_options = Options()
-        firefox_options.add_argument("--headless")  # Re-enable headless for speed
+        # Force headless; also works without Xvfb
+        firefox_options.add_argument("--headless")
         firefox_options.add_argument("--width=1920")
         firefox_options.add_argument("--height=1080")
         
@@ -164,9 +165,20 @@ class FullyAutomatedKiteAuth:
             except Exception as exc:
                 logger.debug("Geckodriver path failed %s: %s", driver_path, exc)
                 continue
-        
-        logger.error("All geckodriver paths failed")
-        raise Exception("Could not initialize Firefox webdriver")
+
+        # Fallback: use webdriver-manager to download/manage geckodriver
+        try:
+            from webdriver_manager.firefox import GeckoDriverManager
+            logger.info("Attempting geckodriver setup via webdriver-manager")
+            driver_path = GeckoDriverManager().install()
+            service = Service(driver_path, log_output=os.devnull)
+            driver = webdriver.Firefox(service=service, options=firefox_options)
+            driver.implicitly_wait(1)
+            return driver
+        except Exception as exc:
+            logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
+            logger.error("All geckodriver setup attempts failed")
+            raise Exception("Could not initialize Firefox webdriver")
     
     def _automated_browser_login(self, login_url: str, timeout: int = 120) -> Optional[str]:
         """Perform fully automated browser login and capture request token."""
