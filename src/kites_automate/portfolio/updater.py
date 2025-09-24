@@ -32,7 +32,7 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
         if not token:
             msg = f"No valid token available; aborting portfolio update for {account.name if account else 'default'}"
             logger.error(msg)
-            send_failure_email(local_ctx, subject="Kites portfolio update failed", details=msg)
+            # Avoid spamming failure emails for token availability; token rotation already emails on failure
             return
 
         adapter = get_adapter(local_ctx)

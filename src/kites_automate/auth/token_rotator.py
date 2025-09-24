@@ -38,9 +38,49 @@ def _read_token_from_disk(path: str) -> Optional[Token]:
             return Token(access_token=data["access_token"], expires_at=float(data["expires_at"]))
     except FileNotFoundError:
         return None
-    except Exception as exc:
-        logger.warning("Failed reading token cache at %s: %s", path, exc)
-        return None
+def _read_automated_token(profile_name: Optional[str] = None) -> Optional[Token]:
+    """Read token saved by fully automated auth (~/.kites/<profile>_access_token.txt)."""
+    try:
+        base_dir = os.path.expanduser("~/.kites")
+        candidate_names = []
+        if profile_name:
+            # Try exact and lowercase variants
+            candidate_names.extend([
+                f"{profile_name}_access_token.txt",
+                f"{profile_name.lower()}_access_token.txt",
+            ])
+        else:
+            # Fallback single-profile filename pattern (rare)
+            candidate_names.append("access_token.txt")
+
+        for fname in candidate_names:
+            fpath = os.path.join(base_dir, fname)
+            if not os.path.exists(fpath):
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                access = data.get("access_token")
+                expires_at_iso = data.get("expires_at")
+                if not access or not expires_at_iso:
+                    continue
+                # Convert ISO8601 to epoch seconds
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(expires_at_iso.replace("Z", "+00:00"))
+                    exp = dt.timestamp()
+                except Exception:
+                    # Default to 8 hours from now if parse fails
+                    import time as _t
+                    exp = _t.time() + 8 * 3600
+                tok = Token(access_token=access, expires_at=exp)
+                if not tok.is_expired:
+                    return tok
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
 
 
 def _write_token_to_disk(path: str, token: Token) -> None:
@@ -57,6 +97,11 @@ def get_valid_token(ctx: RuntimeContext, account: Optional[AccountConfig] = None
     token = _read_token_from_disk(path)
     if token and not token.is_expired:
         return token.access_token
+
+    # Try reading tokens produced by fully automated auth
+    automated = _read_automated_token(name)
+    if automated and not automated.is_expired:
+        return automated.access_token
 
     new_token = rotate_token(ctx, account)
     if new_token:
