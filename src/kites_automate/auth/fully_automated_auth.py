@@ -157,13 +157,15 @@ class FullyAutomatedKiteAuth:
         
         for driver_path in geckodriver_paths:
             try:
+                logger.info("Trying geckodriver at: %s", driver_path)
                 # Suppress geckodriver logs
                 service = Service(driver_path, log_output=os.devnull)
                 driver = webdriver.Firefox(service=service, options=firefox_options)
                 driver.implicitly_wait(1)  # Fast: 1 second only
+                logger.info("Firefox webdriver initialized via: %s", driver_path)
                 return driver
             except Exception as exc:
-                logger.debug("Geckodriver path failed %s: %s", driver_path, exc)
+                logger.warning("Geckodriver path failed %s: %s", driver_path, exc)
                 continue
 
         # Fallback: use webdriver-manager to download/manage geckodriver
@@ -174,6 +176,7 @@ class FullyAutomatedKiteAuth:
             service = Service(driver_path, log_output=os.devnull)
             driver = webdriver.Firefox(service=service, options=firefox_options)
             driver.implicitly_wait(1)
+            logger.info("Firefox webdriver initialized via webdriver-manager")
             return driver
         except Exception as exc:
             logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
