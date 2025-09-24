@@ -36,7 +36,7 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
             return False
 
         adapter = get_adapter(local_ctx)
-        adapter.update_portfolio(local_ctx, token)
+        adapter.update_portfolio(local_ctx, token, account)
 
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         logger.info("Portfolio updated successfully for %s at %s IST", account.name if account else "default", ist_now)

@@ -4,7 +4,7 @@ import os
 import sys
 from typing import Optional, Tuple, Callable
 
-from .config import RuntimeContext
+from .config import RuntimeContext, AccountConfig
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ class BaseKitesAdapter:
     def authenticate(self, ctx: RuntimeContext) -> Tuple[Optional[str], Optional[int]]:
         raise NotImplementedError
 
-    def update_portfolio(self, ctx: RuntimeContext, token: str) -> None:
+    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
         raise NotImplementedError
 
 
@@ -66,17 +66,75 @@ class LocalKitesAdapter(BaseKitesAdapter):
             logger.warning("Local kites adapter auth failed: %s", exc)
         return None, None
 
-    def update_portfolio(self, ctx: RuntimeContext, token: str) -> None:
+    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
         try:
             client = self._ensure_client(ctx)
             
             # Special handling for PortfolioManager which has different method signature
             if self.client_class == "PortfolioManager":
-                # PortfolioManager requires a worksheet and holdings data
-                # This is a complex operation that needs proper setup
-                # Since PortfolioManager is designed for the legacy project's smart_update flow,
-                # we'll skip the kites adapter and let the system fall back to legacy mode
-                logger.info("PortfolioManager is designed for legacy project flow - skipping kites adapter")
+                logger.info("Updating portfolio using PortfolioManager with Kite API")
+                
+                # Get the legacy project path for credentials and profiles
+                legacy_path = ctx.settings.legacy.project_path or "/home/phantomhive/kites-automate"
+                credentials_path = os.path.join(legacy_path, "credentials.json")
+                profiles_path = os.path.join(legacy_path, "profiles.json")
+                
+                # Load profiles to get account information
+                import json
+                with open(profiles_path, 'r') as f:
+                    profiles = json.load(f)
+                
+                # Find the profile for the current account
+                current_account = None
+                account_name = account.name if account else "default"
+                for profile in profiles.get("profiles", []):
+                    if profile["profile_name"].lower() == account_name.lower():
+                        current_account = profile
+                        break
+                
+                if not current_account:
+                    logger.warning("No profile found for account: %s", account_name)
+                    return
+                
+                # Get API credentials from environment variables
+                api_key = os.getenv(current_account['api_key_env'])
+                api_secret = os.getenv(current_account['api_secret_env'])
+                
+                if not api_key or not api_secret:
+                    logger.warning("Missing API credentials for %s (env vars: %s, %s)", 
+                                 account_name, current_account['api_key_env'], current_account['api_secret_env'])
+                    return
+                
+                # Import required classes
+                mod = importlib.import_module(self.module_name)
+                KiteAuthManager = getattr(mod, "KiteAuthManager")
+                SheetManager = getattr(mod, "SheetManager")
+                
+                # Create SheetManager
+                sheet_manager = SheetManager(credentials_path)
+                
+                # Create KiteAuthManager and get client
+                kite_auth = KiteAuthManager(
+                    api_key,
+                    api_secret,
+                    current_account["token_file"]
+                )
+                kite = kite_auth.get_client()
+                
+                # Get spreadsheet and worksheet
+                spreadsheet_name = profiles.get("settings", {}).get("spreadsheet_name", "Portfolio")
+                spreadsheet = sheet_manager.get_or_create_sheet(spreadsheet_name)
+                worksheet = sheet_manager.get_or_create_worksheet(spreadsheet, current_account["profile_name"])
+                
+                # Update portfolio using PortfolioManager
+                summary = client.update_portfolio_sheet(
+                    worksheet,
+                    kite.holdings(),
+                    kite.mf_holdings(),
+                    force_formatting=False
+                )
+                
+                logger.info("Portfolio updated successfully using PortfolioManager")
                 return
             
             # Try the standard update_portfolio method for other client types
@@ -93,7 +151,7 @@ class RestKitesAdapter(BaseKitesAdapter):
         logger.info("REST adapter not implemented; provide local client via KITES_LOCAL_PATH")
         return None, None
 
-    def update_portfolio(self, ctx: RuntimeContext, token: str) -> None:
+    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
         logger.info("REST adapter not implemented; skipping portfolio update")
 
 
@@ -133,7 +191,7 @@ def get_adapter(ctx: RuntimeContext) -> BaseKitesAdapter:
                         logger.warning("Generic local auth failed: %s", exc2)
                     return None, None
 
-                def update_portfolio(self, ctx: RuntimeContext, token: str) -> None:
+                def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
                     try:
                         if hasattr(self.client, "update_portfolio"):
                             return getattr(self.client, "update_portfolio")(token=token)
