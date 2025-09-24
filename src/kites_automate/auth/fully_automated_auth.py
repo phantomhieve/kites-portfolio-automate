@@ -37,6 +37,9 @@ from .webhook_server import TokenWebhookServer
 
 logger = logging.getLogger(__name__)
 
+# Shared Firefox driver for the duration of a renewal batch
+_SHARED_DRIVER = None  # type: ignore[var-annotated]
+
 
 class FullyAutomatedKiteAuth:
     """Fully automated authentication manager for Kite Connect."""
@@ -122,6 +125,9 @@ class FullyAutomatedKiteAuth:
     
     def _setup_webdriver(self) -> webdriver.Firefox:
         """Setup Firefox webdriver with appropriate options."""
+        global _SHARED_DRIVER
+        if _SHARED_DRIVER is not None:
+            return _SHARED_DRIVER
         firefox_options = Options()
         # Force headless; also works without Xvfb
         firefox_options.add_argument("--headless")
@@ -163,7 +169,8 @@ class FullyAutomatedKiteAuth:
                 driver = webdriver.Firefox(service=service, options=firefox_options)
                 driver.implicitly_wait(1)  # Fast: 1 second only
                 logger.info("Firefox webdriver initialized via: %s", driver_path)
-                return driver
+                _SHARED_DRIVER = driver
+                return _SHARED_DRIVER
             except Exception as exc:
                 logger.warning("Geckodriver path failed %s: %s", driver_path, exc)
                 continue
@@ -177,7 +184,8 @@ class FullyAutomatedKiteAuth:
             driver = webdriver.Firefox(service=service, options=firefox_options)
             driver.implicitly_wait(1)
             logger.info("Firefox webdriver initialized via webdriver-manager")
-            return driver
+            _SHARED_DRIVER = driver
+            return _SHARED_DRIVER
         except Exception as exc:
             logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
             logger.error("All geckodriver setup attempts failed")
