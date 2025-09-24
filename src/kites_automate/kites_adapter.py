@@ -2,7 +2,7 @@ import importlib
 import logging
 import os
 import sys
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 from .config import RuntimeContext
 
@@ -73,10 +73,51 @@ def get_adapter(ctx: RuntimeContext) -> BaseKitesAdapter:
     local_path = os.environ.get("KITES_LOCAL_PATH", "/Users/phantomhive/Desktop/Atul/kites")
     module_name = os.environ.get("KITES_LOCAL_MODULE", "kites_client")
     client_class = os.environ.get("KITES_LOCAL_CLIENT_CLASS", "KitesClient")
+    factory_spec = os.environ.get("KITES_LOCAL_FACTORY")  # format: module:function
 
     if os.path.isdir(local_path) and local_path not in sys.path:
         sys.path.insert(0, local_path)
 
+    # If a factory is provided, prefer it to construct the client with custom deps
+    if factory_spec:
+        try:
+            factory_module, factory_func = factory_spec.split(":", 1)
+            mod = importlib.import_module(factory_module)
+            create_client: Callable[[], object] = getattr(mod, factory_func)
+
+            client_instance = create_client()
+
+            class GenericLocalAdapter(BaseKitesAdapter):
+                def __init__(self, client_obj: object) -> None:
+                    self.client = client_obj
+
+                def authenticate(self, ctx: RuntimeContext) -> Tuple[Optional[str], Optional[int]]:
+                    # Try the same auth patterns as LocalKitesAdapter against the provided client
+                    try:
+                        if ctx.settings.kites.api_key and hasattr(self.client, "authenticate_with_api_key"):
+                            return getattr(self.client, "authenticate_with_api_key")(ctx.settings.kites.api_key)
+                        if ctx.settings.kites.client_id and ctx.settings.kites.client_secret and hasattr(self.client, "authenticate_client_credentials"):
+                            return getattr(self.client, "authenticate_client_credentials")(ctx.settings.kites.client_id, ctx.settings.kites.client_secret)
+                        if ctx.settings.kites.username and ctx.settings.kites.password and hasattr(self.client, "authenticate_password"):
+                            return getattr(self.client, "authenticate_password")(ctx.settings.kites.username, ctx.settings.kites.password)
+                    except Exception as exc2:
+                        logger.warning("Generic local auth failed: %s", exc2)
+                    return None, None
+
+                def update_portfolio(self, ctx: RuntimeContext, token: str) -> None:
+                    try:
+                        if hasattr(self.client, "update_portfolio"):
+                            return getattr(self.client, "update_portfolio")(token=token)
+                        logger.warning("Client instance has no update_portfolio method; skipping")
+                    except Exception as exc2:
+                        logger.warning("Generic local portfolio update failed: %s", exc2)
+
+            logger.info("Using LocalKitesAdapter via factory (%s)", factory_spec)
+            return GenericLocalAdapter(client_instance)
+        except Exception as exc:
+            logger.warning("Factory load failed (%s): %s", factory_spec, exc)
+
+    # Class-based construction fallback
     try:
         importlib.import_module(module_name)
         logger.info("Using LocalKitesAdapter (%s.%s)", module_name, client_class)
