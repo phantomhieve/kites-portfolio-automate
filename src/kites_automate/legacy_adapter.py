@@ -53,10 +53,17 @@ def run_legacy(ctx: RuntimeContext) -> None:
         return
 
     # Look for venv in legacy project
-    venv_python = os.path.join(project_path, ".venv", "bin", "python")
+    venv_python = os.path.join(project_path, "venv", "bin", "python")
     if not os.path.exists(venv_python):
-        venv_python = "python3"  # fallback to system python
-        logger.warning("Legacy venv not found, using system python")
+        # Try alternative .venv location
+        venv_python = os.path.join(project_path, ".venv", "bin", "python")
+        if not os.path.exists(venv_python):
+            venv_python = "python3"  # fallback to system python
+            logger.warning("Legacy venv not found, using system python")
+        else:
+            logger.info("Found legacy venv at .venv")
+    else:
+        logger.info("Found legacy venv at venv")
 
     # Set up environment
     env = os.environ.copy()
