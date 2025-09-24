@@ -1,6 +1,9 @@
 import logging
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 from typing import Optional
 
 from ..config import RuntimeContext, AppSettings, AccountConfig
