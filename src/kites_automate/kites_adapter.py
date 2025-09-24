@@ -28,7 +28,22 @@ class LocalKitesAdapter(BaseKitesAdapter):
             return self._client
         mod = importlib.import_module(self.module_name)
         client_cls = getattr(mod, self.client_class)
-        # Some local clients don't accept base_url; try with, then without
+        
+        # Special handling for PortfolioManager which requires SheetManager
+        if self.client_class == "PortfolioManager":
+            try:
+                # Import SheetManager from the same module
+                sheet_manager_cls = getattr(mod, "SheetManager")
+                # Create SheetManager with credentials file path
+                credentials_path = os.path.join(ctx.settings.legacy.project_path or "/home/phantomhive/kites-automate", "credentials.json")
+                sheet_manager = sheet_manager_cls(credentials_path)
+                # Create PortfolioManager with SheetManager
+                self._client = client_cls(sheet_manager)
+                return self._client
+            except Exception as exc:
+                logger.warning("Failed to create PortfolioManager with SheetManager: %s", exc)
+        
+        # Fallback to original logic for other client types
         try:
             self._client = client_cls(
                 base_url=str(ctx.settings.kites.base_url) if ctx.settings.kites.base_url else None
