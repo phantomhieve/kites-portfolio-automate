@@ -195,9 +195,17 @@ class FullyAutomatedKiteAuth:
             logger.info("Starting automated browser login for %s", self.profile_name)
             driver = self._setup_webdriver()
             
-            # Navigate to login page
-            driver.get(login_url)
-            logger.info("Navigated to login page for %s", self.profile_name)
+            # Navigate to login page with a strict timeout
+            try:
+                driver.set_page_load_timeout(20)
+            except Exception:
+                pass
+            try:
+                driver.get(login_url)
+                logger.info("Navigated to login page for %s", self.profile_name)
+            except Exception as exc:
+                logger.error("Page load failed for %s: %s", self.profile_name, exc)
+                return None
             
             # Wait for login form and fill credentials
             wait = WebDriverWait(driver, 3)  # Fast: 3 seconds max
