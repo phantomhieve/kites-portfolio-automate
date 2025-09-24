@@ -198,17 +198,30 @@ class FullyAutomatedKiteAuth:
             logger.info("Starting automated browser login for %s", self.profile_name)
             driver = self._setup_webdriver()
             
-            # Navigate to login page with a strict timeout
+            # Navigate to login page with a more forgiving strategy/timeout
             try:
-                driver.set_page_load_timeout(20)
-            except Exception:
-                pass
-            try:
+                # Eager: DOMContentLoaded is enough; avoids waiting on ads/analytics
+                driver.execute_script("return 1")
+                driver.set_page_load_timeout(60)
                 driver.get(login_url)
                 logger.info("Navigated to login page for %s", self.profile_name)
             except Exception as exc:
-                logger.error("Page load failed for %s: %s", self.profile_name, exc)
-                return None
+                logger.warning("Page load timed out/failed for %s: %s", self.profile_name, exc)
+                # Save a screenshot for debugging and try to proceed anyway
+                try:
+                    driver.save_screenshot(f"/tmp/zerodha_login_timeout_{self.profile_name}.png")
+                    logger.info("Timeout screenshot saved to /tmp/zerodha_login_timeout_%s.png", self.profile_name)
+                except Exception:
+                    pass
+                # Attempt a single retry after a short pause
+                try:
+                    import time as _t
+                    _t.sleep(2)
+                    driver.get(login_url)
+                    logger.info("Retry navigated to login page for %s", self.profile_name)
+                except Exception as exc2:
+                    logger.error("Retry page load failed for %s: %s", self.profile_name, exc2)
+                    # Continue to element detection anyway; some sites still render enough
             
             # Wait for login form and fill credentials
             wait = WebDriverWait(driver, 3)  # Fast: 3 seconds max
