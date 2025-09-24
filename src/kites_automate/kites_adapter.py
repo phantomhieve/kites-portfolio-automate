@@ -28,7 +28,13 @@ class LocalKitesAdapter(BaseKitesAdapter):
             return self._client
         mod = importlib.import_module(self.module_name)
         client_cls = getattr(mod, self.client_class)
-        self._client = client_cls(base_url=str(ctx.settings.kites.base_url) if ctx.settings.kites.base_url else None)
+        # Some local clients don't accept base_url; try with, then without
+        try:
+            self._client = client_cls(
+                base_url=str(ctx.settings.kites.base_url) if ctx.settings.kites.base_url else None
+            )
+        except TypeError:
+            self._client = client_cls()
         return self._client
 
     def authenticate(self, ctx: RuntimeContext) -> Tuple[Optional[str], Optional[int]]:
