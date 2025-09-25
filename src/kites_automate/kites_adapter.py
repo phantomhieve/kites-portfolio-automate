@@ -135,6 +135,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 
                 # Debug: Log API key and account info
                 logger.info("Using API key for %s: %s", account_name, api_key[:10] + "...")
+                logger.info("Environment API key for %s: %s", current_account['api_key_env'], api_key[:10] + "...")
                 
                 # Instead of using get_valid_token, read the token directly from the file
                 # that was created by the automated token renewal
@@ -155,6 +156,14 @@ class LocalKitesAdapter(BaseKitesAdapter):
                     valid_token = token_data['access_token']
                     kite.set_access_token(valid_token)
                     logger.info("Using token from file for %s: %s", account_name, valid_token[:10] + "...")
+                    
+                    # Test if the token works by making a simple API call
+                    try:
+                        profile = kite.profile()
+                        logger.info("Token validation successful for %s", account_name)
+                    except Exception as exc:
+                        logger.error("Token validation failed for %s: %s", account_name, exc)
+                        return
                     
                 except Exception as exc:
                     logger.error("Failed to read token file %s: %s", token_file_path, exc)
