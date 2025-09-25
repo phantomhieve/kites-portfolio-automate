@@ -136,20 +136,30 @@ class FullyAutomatedKiteAuth:
             return None
     
     def _setup_webdriver(self) -> webdriver.Firefox:
-        """Setup Firefox webdriver with appropriate options."""
+        """Setup Firefox webdriver with appropriate options. Always fresh per profile."""
         global _SHARED_DRIVER
-        if _SHARED_DRIVER is not None:
-            # Verify the existing session is still alive; if not, recreate
-            try:
-                _SHARED_DRIVER.execute_script("return 1")
-                return _SHARED_DRIVER
-            except Exception:
-                _SHARED_DRIVER = None
+        # Do not reuse any previous driver to avoid session bleed across profiles
+        _SHARED_DRIVER = None
         firefox_options = Options()
         # Force headless; also works without Xvfb
         firefox_options.add_argument("--headless")
         firefox_options.add_argument("--width=1920")
         firefox_options.add_argument("--height=1080")
+        
+        # Start in private browsing to isolate per-profile sessions
+        firefox_options.set_preference("browser.privatebrowsing.autostart", True)
+        
+        # Create a unique temporary profile directory for this run to ensure isolation
+        self._temp_profile_dir = None
+        try:
+            import tempfile
+            self._temp_profile_dir = tempfile.mkdtemp(prefix=f"kites_ff_{self.profile_name}_")
+            # Ensure no remote reuse and force explicit profile
+            firefox_options.add_argument("-no-remote")
+            firefox_options.add_argument("-profile")
+            firefox_options.add_argument(self._temp_profile_dir)
+        except Exception:
+            self._temp_profile_dir = None
         
         # Performance optimizations
         firefox_options.set_preference("dom.webdriver.enabled", False)
@@ -169,7 +179,6 @@ class FullyAutomatedKiteAuth:
         firefox_options.set_preference("browser.cache.memory.enable", False)
         firefox_options.set_preference("browser.cache.offline.enable", False)
         firefox_options.set_preference("network.http.use-cache", False)
-        
         # Use system geckodriver (try multiple paths for cross-platform)
         geckodriver_paths = [
             "/opt/homebrew/bin/geckodriver",  # macOS Homebrew
@@ -186,8 +195,7 @@ class FullyAutomatedKiteAuth:
                 driver = webdriver.Firefox(service=service, options=firefox_options)
                 driver.implicitly_wait(1)  # Fast: 1 second only
                 logger.info("Firefox webdriver initialized via: %s", driver_path)
-                _SHARED_DRIVER = driver
-                return _SHARED_DRIVER
+                return driver
             except Exception as exc:
                 logger.warning("Geckodriver path failed %s: %s", driver_path, exc)
                 continue
@@ -201,8 +209,7 @@ class FullyAutomatedKiteAuth:
             driver = webdriver.Firefox(service=service, options=firefox_options)
             driver.implicitly_wait(1)
             logger.info("Firefox webdriver initialized via webdriver-manager")
-            _SHARED_DRIVER = driver
-            return _SHARED_DRIVER
+            return driver
         except Exception as exc:
             logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
             logger.error("All geckodriver setup attempts failed")
@@ -483,6 +490,31 @@ class FullyAutomatedKiteAuth:
             # Keep the shared driver alive across profiles for speed and stability
             if server:
                 server.stop()
+            # Close browser to enforce per-profile isolation (incognito per run)
+            try:
+                if driver is not None:
+                    try:
+                        driver.delete_all_cookies()
+                    except Exception:
+                        pass
+                    driver.quit()
+            except Exception:
+                pass
+            finally:
+                # Reset shared reference to avoid reuse across profiles and cleanup temp profile
+                try:
+                    global _SHARED_DRIVER
+                    _SHARED_DRIVER = None
+                except Exception:
+                    pass
+                # Cleanup temporary Firefox profile directory if created
+                if getattr(self, "_temp_profile_dir", None):
+                    try:
+                        import shutil
+                        shutil.rmtree(self._temp_profile_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                    self._temp_profile_dir = None
     
     def _generate_access_token(self, request_token: str) -> Optional[str]:
         """Generate access token from request token using kiteconnect."""
@@ -589,6 +621,11 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
     
     try:
         profiles = profiles_config.get('profiles', [])
+        # Configurable pause between profiles to reduce CPU/memory spikes
+        try:
+            pause_seconds = float(os.getenv("KITES_PROFILE_PAUSE", "1.0"))
+        except Exception:
+            pause_seconds = 1.0
         
         for profile in profiles:
             profile_name = profile.get('profile_name')
@@ -635,8 +672,8 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
             else:
                 logger.error("❌ Fully automated renewal failed for %s", profile_name)
             
-            # Reduced delay between profiles
-            time.sleep(1)
+            # Reduced delay between profiles (configurable via KITES_PROFILE_PAUSE)
+            time.sleep(pause_seconds)
             
     except Exception as exc:
         logger.error("Fully automated token renewal failed: %s", exc)
