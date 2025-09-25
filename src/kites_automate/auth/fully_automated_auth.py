@@ -280,8 +280,42 @@ class FullyAutomatedKiteAuth:
                 logger.info("Debug screenshot saved to /tmp/zerodha_login_debug.png")
                 raise Exception("Username field not found")
             
-            username_field.clear()
-            username_field.send_keys(self.username)
+            # Robustly focus and fill inputs in headless firefox
+            def _robust_fill(el, text):
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", el)
+                except Exception:
+                    pass
+                try:
+                    from selenium.webdriver import ActionChains
+                    ActionChains(driver).move_to_element(el).perform()
+                except Exception:
+                    pass
+                try:
+                    el.click()
+                except Exception:
+                    pass
+                try:
+                    el.clear()
+                except Exception:
+                    pass
+                try:
+                    el.send_keys(text)
+                    return True
+                except Exception:
+                    # Fallback: set value via JS and dispatch events
+                    try:
+                        driver.execute_script(
+                            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', {bubbles:true})); arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
+                            el,
+                            text,
+                        )
+                        return True
+                    except Exception:
+                        return False
+
+            if not _robust_fill(username_field, self.username):
+                raise Exception("Failed to fill username field")
             logger.info("Username entered for %s", self.profile_name)
             
             # Fill password - optimized order
@@ -306,8 +340,8 @@ class FullyAutomatedKiteAuth:
                 logger.info("Debug screenshot saved to /tmp/zerodha_password_debug.png")
                 raise Exception("Password field not found")
             
-            password_field.clear()
-            password_field.send_keys(self.password)
+            if not _robust_fill(password_field, self.password):
+                raise Exception("Failed to fill password field")
             logger.info("Password entered for %s", self.profile_name)
             
             # Click login button
