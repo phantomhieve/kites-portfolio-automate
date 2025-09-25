@@ -53,6 +53,50 @@ def _shutdown_shared_driver() -> None:
         _SHARED_DRIVER = None
 
 
+def _cleanup_between_profiles(profile_index: int, total_profiles: int, base_pause: float) -> None:
+    """Aggressive cleanup and resource management between profiles to reduce CPU usage."""
+    try:
+        logger.info("Cleaning up between profiles (%d/%d)", profile_index + 1, total_profiles)
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Kill any orphaned Firefox processes
+        try:
+            import subprocess
+            subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
+            subprocess.run(['pkill', '-f', 'geckodriver'], capture_output=True)
+        except Exception:
+            pass
+        
+        # Clear any temporary files
+        try:
+            import tempfile
+            import glob
+            temp_pattern = os.path.join(tempfile.gettempdir(), "kites_ff_*")
+            for temp_dir in glob.glob(temp_pattern):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        # Progressive pause - longer pause after more profiles to let system recover
+        if profile_index > 0:
+            pause_time = base_pause + (profile_index * 0.5)  # Increasing pause
+            logger.info("Pausing for %.1f seconds to let system recover", pause_time)
+            time.sleep(pause_time)
+        else:
+            time.sleep(base_pause)
+            
+    except Exception as exc:
+        logger.warning("Error during profile cleanup: %s", exc)
+        time.sleep(base_pause)  # Fallback pause
+
+
 class FullyAutomatedKiteAuth:
     """Fully automated authentication manager for Kite Connect."""
     
@@ -180,6 +224,47 @@ class FullyAutomatedKiteAuth:
             logger.warning("Could not setup virtual display: %s", exc)
             self._xvfb_process = None
     
+    def _aggressive_cleanup(self) -> None:
+        """Aggressive cleanup to reduce CPU usage between profiles."""
+        try:
+            logger.info("Performing aggressive cleanup for %s", self.profile_name)
+            
+            # Reset shared driver reference
+            try:
+                global _SHARED_DRIVER
+                _SHARED_DRIVER = None
+            except Exception:
+                pass
+            
+            # Cleanup temporary Firefox profile directory
+            if getattr(self, "_temp_profile_dir", None):
+                try:
+                    import shutil
+                    shutil.rmtree(self._temp_profile_dir, ignore_errors=True)
+                    logger.info("Cleaned up temp profile directory for %s", self.profile_name)
+                except Exception:
+                    pass
+                self._temp_profile_dir = None
+            
+            # Kill any remaining Firefox processes for this profile
+            try:
+                import subprocess
+                subprocess.run(['pkill', '-f', f'kites_ff_{self.profile_name}'], capture_output=True)
+                subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
+                logger.info("Killed remaining Firefox processes for %s", self.profile_name)
+            except Exception:
+                pass
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Small delay to let system recover
+            time.sleep(0.5)
+            
+        except Exception as exc:
+            logger.warning("Error during aggressive cleanup for %s: %s", self.profile_name, exc)
+    
     def _setup_webdriver(self) -> webdriver.Firefox:
         """Setup Firefox webdriver with VM-friendly options and timeout protection."""
         global _SHARED_DRIVER
@@ -258,10 +343,22 @@ class FullyAutomatedKiteAuth:
         firefox_options.set_preference("startup.homepage_welcome_url", "about:blank")
         firefox_options.set_preference("startup.homepage_welcome_url.additional", "about:blank")
         
-        # Process limits for headless environments
+        # Process limits and CPU throttling for headless environments
         firefox_options.set_preference("dom.max_script_run_time", 30)  # Prevent hanging scripts
         firefox_options.set_preference("dom.max_chrome_script_run_time", 30)
         firefox_options.set_preference("dom.ipc.processCount", 1)  # Single process for headless
+        
+        # CPU and memory throttling
+        firefox_options.set_preference("browser.cache.memory.capacity", 65536)  # 64MB max cache
+        firefox_options.set_preference("browser.cache.disk.capacity", 131072)   # 128MB max disk cache
+        firefox_options.set_preference("browser.sessionstore.max_tabs_undo", 0)  # No tab undo
+        firefox_options.set_preference("browser.sessionstore.max_windows_undo", 0)  # No window undo
+        firefox_options.set_preference("browser.sessionstore.interval", 60000)  # 1 minute session save
+        
+        # Reduce CPU usage
+        firefox_options.set_preference("layout.frame_rate", 30)  # Cap frame rate
+        firefox_options.set_preference("gfx.webrender.all", False)  # Disable WebRender
+        firefox_options.set_preference("layers.acceleration.disabled", True)  # Disable hardware acceleration
         # Use system geckodriver (try multiple paths for cross-platform)
         geckodriver_paths = [
             "/opt/homebrew/bin/geckodriver",  # macOS Homebrew
@@ -657,31 +754,8 @@ class FullyAutomatedKiteAuth:
             except Exception:
                 pass
             finally:
-                # Reset shared reference to avoid reuse across profiles and cleanup temp profile
-                try:
-                    global _SHARED_DRIVER
-                    _SHARED_DRIVER = None
-                except Exception:
-                    pass
-                # Cleanup temporary Firefox profile directory if created
-                if getattr(self, "_temp_profile_dir", None):
-                    try:
-                        import shutil
-                        shutil.rmtree(self._temp_profile_dir, ignore_errors=True)
-                    except Exception:
-                        pass
-                    self._temp_profile_dir = None
-                # Cleanup virtual display process
-                if getattr(self, "_xvfb_process", None):
-                    try:
-                        self._xvfb_process.terminate()
-                        self._xvfb_process.wait(timeout=5)
-                    except Exception:
-                        try:
-                            self._xvfb_process.kill()
-                        except Exception:
-                            pass
-                    self._xvfb_process = None
+                # Aggressive cleanup after each profile to reduce CPU usage
+                self._aggressive_cleanup()
     
     def _generate_access_token(self, request_token: str) -> Optional[str]:
         """Generate access token from request token using kiteconnect."""
@@ -790,11 +864,12 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
         profiles = profiles_config.get('profiles', [])
         # Configurable pause between profiles to reduce CPU/memory spikes
         try:
-            pause_seconds = float(os.getenv("KITES_PROFILE_PAUSE", "1.0"))
+            pause_seconds = float(os.getenv("KITES_PROFILE_PAUSE", "2.0"))  # Increased default
         except Exception:
-            pause_seconds = 1.0
+            pause_seconds = 2.0
         
-        for profile in profiles:
+        # Process profiles with resource management
+        for i, profile in enumerate(profiles):
             profile_name = profile.get('profile_name')
             api_key_env = profile.get('api_key_env')
             api_secret_env = profile.get('api_secret_env')
@@ -839,8 +914,8 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
             else:
                 logger.error("❌ Fully automated renewal failed for %s", profile_name)
             
-            # Reduced delay between profiles (configurable via KITES_PROFILE_PAUSE)
-            time.sleep(pause_seconds)
+            # Aggressive cleanup and resource management between profiles
+            _cleanup_between_profiles(i, len(profiles), pause_seconds)
             
     except Exception as exc:
         logger.error("Fully automated token renewal failed: %s", exc)
