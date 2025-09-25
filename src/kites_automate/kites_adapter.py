@@ -94,7 +94,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 
                 if not current_account:
                     logger.warning("No profile found for account: %s", account_name)
-                    return
+                    raise RuntimeError(f"No profile found for account: {account_name}")
                 
                 # Get API credentials from environment variables
                 api_key = os.getenv(current_account['api_key_env'])
@@ -103,7 +103,9 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 if not api_key or not api_secret:
                     logger.warning("Missing API credentials for %s (env vars: %s, %s)", 
                                  account_name, current_account['api_key_env'], current_account['api_secret_env'])
-                    return
+                    raise RuntimeError(
+                        f"Missing API credentials for {account_name} (env vars: {current_account['api_key_env']}, {current_account['api_secret_env']})"
+                    )
                 
                 # Import required classes
                 mod = importlib.import_module(self.module_name)
@@ -142,7 +144,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 token_file_path = os.path.expanduser(f"~/.kites/{token_file}")
                 if not os.path.exists(token_file_path):
                     logger.error("Token file does not exist: %s", token_file_path)
-                    return
+                    raise RuntimeError(f"Token file does not exist: {token_file_path}")
                 
                 try:
                     import json
@@ -151,7 +153,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
                     
                     if 'access_token' not in token_data:
                         logger.error("No access_token in token file: %s", token_file_path)
-                        return
+                        raise RuntimeError(f"No access_token in token file: {token_file_path}")
                     
                     valid_token = token_data['access_token']
                     kite.set_access_token(valid_token)
@@ -163,11 +165,11 @@ class LocalKitesAdapter(BaseKitesAdapter):
                         logger.info("Token validation successful for %s", account_name)
                     except Exception as exc:
                         logger.error("Token validation failed for %s: %s", account_name, exc)
-                        return
+                        raise RuntimeError(f"Token validation failed for {account_name}: {exc}")
                     
                 except Exception as exc:
                     logger.error("Failed to read token file %s: %s", token_file_path, exc)
-                    return
+                    raise
                 
                 # Get spreadsheet and worksheet
                 spreadsheet_name = profiles.get("settings", {}).get("spreadsheet_name", "Portfolio")
@@ -192,6 +194,8 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 logger.warning("Client %s has no update_portfolio method", self.client_class)
         except Exception as exc:
             logger.warning("Local kites adapter portfolio update failed: %s", exc)
+            # Re-raise so callers can mark the update as failed
+            raise
 
 
 class RestKitesAdapter(BaseKitesAdapter):
