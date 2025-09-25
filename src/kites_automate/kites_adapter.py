@@ -105,10 +105,6 @@ class LocalKitesAdapter(BaseKitesAdapter):
                                  account_name, current_account['api_key_env'], current_account['api_secret_env'])
                     return
                 
-                # Debug: Check what API key the automated renewal actually used
-                # The automated renewal might be using different API keys
-                logger.info("API key from env %s: %s", current_account['api_key_env'], api_key[:10] + "...")
-                
                 # Import required classes
                 mod = importlib.import_module(self.module_name)
                 KiteAuthManager = getattr(mod, "KiteAuthManager")
@@ -132,43 +128,46 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 else:
                     logger.warning("~/.kites directory does not exist")
                 
-                # Use KiteAuthManager but with the correct token file name
-                # The issue might be that we need to use KiteAuthManager for proper token handling
-                kite_auth = KiteAuthManager(
-                    api_key,
-                    api_secret,
-                    token_file
-                )
+                # Instead of using KiteAuthManager (which might fail validation),
+                # use the token that was already validated by the kites-automate system
+                from kiteconnect import KiteConnect
+                kite = KiteConnect(api_key=api_key)
                 
-                # Try to get the client, but if it fails, we'll handle it gracefully
+                # Debug: Log API key and account info
+                logger.info("Using API key for %s: %s", account_name, api_key[:10] + "...")
+                logger.info("Environment API key for %s: %s", current_account['api_key_env'], api_key[:10] + "...")
+                
+                # Instead of using get_valid_token, read the token directly from the file
+                # that was created by the automated token renewal
+                token_file_path = os.path.expanduser(f"~/.kites/{token_file}")
+                if not os.path.exists(token_file_path):
+                    logger.error("Token file does not exist: %s", token_file_path)
+                    return
+                
                 try:
-                    kite = kite_auth.get_client()
-                    logger.info("KiteAuthManager successfully created client for %s", account_name)
-                except Exception as exc:
-                    logger.warning("KiteAuthManager failed for %s: %s", account_name, exc)
-                    # Fall back to direct token reading
-                    from kiteconnect import KiteConnect
-                    kite = KiteConnect(api_key=api_key)
+                    import json
+                    with open(token_file_path, 'r') as f:
+                        token_data = json.load(f)
                     
-                    # Read token directly from file
-                    token_file_path = os.path.expanduser(f"~/.kites/{token_file}")
-                    if os.path.exists(token_file_path):
-                        try:
-                            import json
-                            with open(token_file_path, 'r') as f:
-                                token_data = json.load(f)
-                            if 'access_token' in token_data:
-                                kite.set_access_token(token_data['access_token'])
-                                logger.info("Using direct token for %s", account_name)
-                            else:
-                                logger.error("No access_token in file for %s", account_name)
-                                return
-                        except Exception as exc2:
-                            logger.error("Failed to read token file for %s: %s", account_name, exc2)
-                            return
-                    else:
-                        logger.error("Token file not found for %s: %s", account_name, token_file_path)
+                    if 'access_token' not in token_data:
+                        logger.error("No access_token in token file: %s", token_file_path)
                         return
+                    
+                    valid_token = token_data['access_token']
+                    kite.set_access_token(valid_token)
+                    logger.info("Using token from file for %s: %s", account_name, valid_token[:10] + "...")
+                    
+                    # Test if the token works by making a simple API call
+                    try:
+                        profile = kite.profile()
+                        logger.info("Token validation successful for %s", account_name)
+                    except Exception as exc:
+                        logger.error("Token validation failed for %s: %s", account_name, exc)
+                        return
+                    
+                except Exception as exc:
+                    logger.error("Failed to read token file %s: %s", token_file_path, exc)
+                    return
                 
                 # Get spreadsheet and worksheet
                 spreadsheet_name = profiles.get("settings", {}).get("spreadsheet_name", "Portfolio")
