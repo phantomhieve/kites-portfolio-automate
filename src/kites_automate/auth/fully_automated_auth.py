@@ -135,16 +135,75 @@ class FullyAutomatedKiteAuth:
             logger.error("Error generating TOTP for %s: %s", self.profile_name, exc)
             return None
     
+    def _setup_virtual_display(self) -> None:
+        """Setup virtual display for headless environments."""
+        try:
+            # Always setup virtual display for headless operation
+            logger.info("Setting up virtual display for headless operation")
+            
+            import subprocess
+            
+            # Kill any existing Xvfb processes
+            try:
+                subprocess.run(['pkill', '-f', 'Xvfb'], capture_output=True)
+                time.sleep(1)
+            except Exception:
+                pass
+            
+            # Start Xvfb with minimal configuration for headless operation
+            xvfb_cmd = [
+                'Xvfb', ':99',
+                '-screen', '0', '1280x720x24',
+                '-ac',  # Disable access control
+                '+extension', 'GLX',
+                '+extension', 'RANDR',
+                '+render',
+                '-noreset'  # Don't reset after last client disconnects
+            ]
+            
+            self._xvfb_process = subprocess.Popen(
+                xvfb_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            )
+            
+            # Set DISPLAY environment variable
+            os.environ['DISPLAY'] = ':99'
+            
+            # Give Xvfb time to start
+            time.sleep(2)
+            
+            logger.info("Virtual display started on :99 for headless operation")
+                
+        except Exception as exc:
+            logger.warning("Could not setup virtual display: %s", exc)
+            self._xvfb_process = None
+    
     def _setup_webdriver(self) -> webdriver.Firefox:
-        """Setup Firefox webdriver with appropriate options. Always fresh per profile."""
+        """Setup Firefox webdriver with VM-friendly options and timeout protection."""
         global _SHARED_DRIVER
         # Do not reuse any previous driver to avoid session bleed across profiles
         _SHARED_DRIVER = None
+        
+        # Setup virtual display for VM environments
+        self._setup_virtual_display()
+        
         firefox_options = Options()
-        # Force headless; also works without Xvfb
+        
+        # Pure headless configuration - no display needed
         firefox_options.add_argument("--headless")
-        firefox_options.add_argument("--width=1920")
-        firefox_options.add_argument("--height=1080")
+        firefox_options.add_argument("--width=1280")
+        firefox_options.add_argument("--height=720")
+        firefox_options.add_argument("--no-sandbox")
+        firefox_options.add_argument("--disable-dev-shm-usage")
+        firefox_options.add_argument("--disable-gpu")
+        firefox_options.add_argument("--disable-extensions")
+        firefox_options.add_argument("--disable-background-timer-throttling")
+        firefox_options.add_argument("--disable-backgrounding-occluded-windows")
+        firefox_options.add_argument("--disable-renderer-backgrounding")
+        firefox_options.add_argument("--disable-web-security")  # Headless optimization
+        firefox_options.add_argument("--disable-features=VizDisplayCompositor")  # Headless optimization
         
         # Start in private browsing to isolate per-profile sessions
         firefox_options.set_preference("browser.privatebrowsing.autostart", True)
@@ -161,7 +220,7 @@ class FullyAutomatedKiteAuth:
         except Exception:
             self._temp_profile_dir = None
         
-        # Performance optimizations
+        # VM-optimized performance settings
         firefox_options.set_preference("dom.webdriver.enabled", False)
         firefox_options.set_preference("useAutomationExtension", False)
         firefox_options.set_preference("permissions.default.image", 2)  # Disable images
@@ -170,15 +229,39 @@ class FullyAutomatedKiteAuth:
         firefox_options.set_preference("javascript.enabled", True)  # Keep JS for form submission
         firefox_options.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
         firefox_options.set_preference("media.volume_scale", "0.0")  # Mute audio
+        
+        # Memory-conscious network settings for VMs
         firefox_options.set_preference("network.http.pipelining", True)
-        firefox_options.set_preference("network.http.pipelining.maxrequests", 8)
-        firefox_options.set_preference("content.notify.interval", 500000)
+        firefox_options.set_preference("network.http.pipelining.maxrequests", 4)  # Reduced from 8
+        firefox_options.set_preference("content.notify.interval", 1000000)  # Increased for VM
         firefox_options.set_preference("content.notify.ontimer", True)
-        firefox_options.set_preference("content.switch.threshold", 500000)
+        firefox_options.set_preference("content.switch.threshold", 1000000)  # Increased for VM
         firefox_options.set_preference("browser.cache.disk.enable", False)
         firefox_options.set_preference("browser.cache.memory.enable", False)
         firefox_options.set_preference("browser.cache.offline.enable", False)
         firefox_options.set_preference("network.http.use-cache", False)
+        
+        # Headless-optimized stability settings
+        firefox_options.set_preference("browser.tabs.animate", False)
+        firefox_options.set_preference("browser.fullscreen.animateUp", 0)
+        firefox_options.set_preference("browser.panorama.animate_zoom", False)
+        firefox_options.set_preference("general.smoothScroll", False)
+        firefox_options.set_preference("layout.animated-image-limit", 0)
+        firefox_options.set_preference("toolkit.cosmeticAnimations.enabled", False)
+        
+        # Additional headless optimizations
+        firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
+        firefox_options.set_preference("browser.download.useDownloadDir", False)
+        firefox_options.set_preference("browser.shell.checkDefaultBrowser", False)
+        firefox_options.set_preference("browser.startup.page", 0)  # Blank page
+        firefox_options.set_preference("browser.startup.homepage", "about:blank")
+        firefox_options.set_preference("startup.homepage_welcome_url", "about:blank")
+        firefox_options.set_preference("startup.homepage_welcome_url.additional", "about:blank")
+        
+        # Process limits for headless environments
+        firefox_options.set_preference("dom.max_script_run_time", 30)  # Prevent hanging scripts
+        firefox_options.set_preference("dom.max_chrome_script_run_time", 30)
+        firefox_options.set_preference("dom.ipc.processCount", 1)  # Single process for headless
         # Use system geckodriver (try multiple paths for cross-platform)
         geckodriver_paths = [
             "/opt/homebrew/bin/geckodriver",  # macOS Homebrew
@@ -187,29 +270,102 @@ class FullyAutomatedKiteAuth:
             "geckodriver"                     # System PATH
         ]
         
+        # Try each geckodriver path with timeout protection
         for driver_path in geckodriver_paths:
             try:
                 logger.info("Trying geckodriver at: %s", driver_path)
-                # Suppress geckodriver logs
+                # Suppress geckodriver logs and add timeout
                 service = Service(driver_path, log_output=os.devnull)
-                driver = webdriver.Firefox(service=service, options=firefox_options)
-                driver.implicitly_wait(1)  # Fast: 1 second only
-                logger.info("Firefox webdriver initialized via: %s", driver_path)
-                return driver
+                
+                # Use threading with timeout to prevent system freeze
+                driver_result = [None]
+                driver_error = [None]
+                
+                def init_driver():
+                    try:
+                        driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
+                        driver_result[0].implicitly_wait(1)  # Fast: 1 second only
+                    except Exception as e:
+                        driver_error[0] = e
+                
+                # Start driver initialization in a separate thread
+                import threading
+                driver_thread = threading.Thread(target=init_driver)
+                driver_thread.daemon = True
+                driver_thread.start()
+                
+                # Wait for driver with timeout (30 seconds max)
+                driver_thread.join(timeout=30)
+                
+                if driver_thread.is_alive():
+                    logger.warning("Driver initialization timed out for %s", driver_path)
+                    continue
+                
+                if driver_result[0] is not None:
+                    logger.info("Firefox webdriver initialized via: %s", driver_path)
+                    return driver_result[0]
+                elif driver_error[0]:
+                    logger.warning("Geckodriver path failed %s: %s", driver_path, driver_error[0])
+                    
             except Exception as exc:
                 logger.warning("Geckodriver path failed %s: %s", driver_path, exc)
                 continue
 
-        # Fallback: use webdriver-manager to download/manage geckodriver
+        # Fallback: use webdriver-manager to download/manage geckodriver with timeout
         try:
             from webdriver_manager.firefox import GeckoDriverManager
             logger.info("Attempting geckodriver setup via webdriver-manager")
-            driver_path = GeckoDriverManager().install()
+            
+            # Download with timeout
+            manager_result = [None]
+            manager_error = [None]
+            
+            def download_manager():
+                try:
+                    manager_result[0] = GeckoDriverManager().install()
+                except Exception as e:
+                    manager_error[0] = e
+            
+            manager_thread = threading.Thread(target=download_manager)
+            manager_thread.daemon = True
+            manager_thread.start()
+            manager_thread.join(timeout=60)  # 60 seconds for download
+            
+            if manager_thread.is_alive():
+                logger.error("Webdriver-manager download timed out")
+                raise Exception("Webdriver-manager download timeout")
+            
+            if manager_result[0] is None:
+                raise Exception(f"Webdriver-manager failed: {manager_error[0]}")
+            
+            driver_path = manager_result[0]
             service = Service(driver_path, log_output=os.devnull)
-            driver = webdriver.Firefox(service=service, options=firefox_options)
-            driver.implicitly_wait(1)
-            logger.info("Firefox webdriver initialized via webdriver-manager")
-            return driver
+            
+            # Initialize driver with timeout
+            driver_result = [None]
+            driver_error = [None]
+            
+            def init_manager_driver():
+                try:
+                    driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
+                    driver_result[0].implicitly_wait(1)
+                except Exception as e:
+                    driver_error[0] = e
+            
+            driver_thread = threading.Thread(target=init_manager_driver)
+            driver_thread.daemon = True
+            driver_thread.start()
+            driver_thread.join(timeout=30)
+            
+            if driver_thread.is_alive():
+                raise Exception("Driver initialization timed out via webdriver-manager")
+            
+            if driver_result[0] is not None:
+                logger.info("Firefox webdriver initialized via webdriver-manager")
+                return driver_result[0]
+            else:
+                raise Exception(f"Driver init failed: {driver_error[0]}")
+                
         except Exception as exc:
             logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
             logger.error("All geckodriver setup attempts failed")
@@ -515,6 +671,17 @@ class FullyAutomatedKiteAuth:
                     except Exception:
                         pass
                     self._temp_profile_dir = None
+                # Cleanup virtual display process
+                if getattr(self, "_xvfb_process", None):
+                    try:
+                        self._xvfb_process.terminate()
+                        self._xvfb_process.wait(timeout=5)
+                    except Exception:
+                        try:
+                            self._xvfb_process.kill()
+                        except Exception:
+                            pass
+                    self._xvfb_process = None
     
     def _generate_access_token(self, request_token: str) -> Optional[str]:
         """Generate access token from request token using kiteconnect."""
