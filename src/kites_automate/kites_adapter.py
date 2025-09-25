@@ -134,7 +134,12 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 kite = KiteConnect(api_key=api_key)
                 
                 # Get the validated token from the kites-automate token system
-                from ..auth.token_rotator import get_valid_token
+                # Use dynamic import to avoid relative import issues
+                import sys
+                import importlib
+                token_rotator_module = importlib.import_module('kites_automate.auth.token_rotator')
+                get_valid_token = getattr(token_rotator_module, 'get_valid_token')
+                
                 valid_token = get_valid_token(ctx, account)
                 if not valid_token:
                     logger.error("No valid token available for %s", account_name)
