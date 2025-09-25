@@ -120,7 +120,6 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 token_file = f"{current_account['profile_name']}_access_token.txt"
                 
                 # Debug: Check what token files actually exist
-                import os
                 kites_dir = os.path.expanduser("~/.kites")
                 if os.path.exists(kites_dir):
                     all_files = os.listdir(kites_dir)
