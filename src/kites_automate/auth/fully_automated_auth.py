@@ -370,7 +370,7 @@ class FullyAutomatedKiteAuth:
                     
                     for selector_type, selector_value in totp_selectors:
                         try:
-                    totp_field = WebDriverWait(driver, 2).until(EC.presence_of_element_located((selector_type, selector_value)))
+                            totp_field = WebDriverWait(driver, 2).until(EC.presence_of_element_located((selector_type, selector_value)))
                             logger.info("Found TOTP field using %s: %s", selector_type, selector_value)
                             break
                         except Exception:
