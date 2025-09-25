@@ -216,7 +216,7 @@ class FullyAutomatedKiteAuth:
         try:
             # Start webhook server
             server = TokenWebhookServer(host="localhost", port=8080)
-            callback_url = server.start()
+            server.start()
             logger.info("Webhook server started for %s", self.profile_name)
             
             # Setup webdriver
@@ -228,6 +228,8 @@ class FullyAutomatedKiteAuth:
                 # Eager: DOMContentLoaded is enough; avoids waiting on ads/analytics
                 driver.execute_script("return 1")
                 driver.set_page_load_timeout(60)
+                # Build login URL using the server's redirect URL helper
+                login_url = server.get_redirect_url(self.api_key)
                 driver.get(login_url)
                 logger.info("Navigated to login page for %s", self.profile_name)
             except Exception as exc:
@@ -249,7 +251,7 @@ class FullyAutomatedKiteAuth:
                     # Continue to element detection anyway; some sites still render enough
             
             # Wait for login form and fill credentials
-            wait = WebDriverWait(driver, 3)  # Fast: 3 seconds max
+            wait = WebDriverWait(driver, 5)  # Slightly more tolerant
             
             # Check page loaded correctly
             logger.info("Login page loaded: %s", driver.title)
@@ -368,7 +370,7 @@ class FullyAutomatedKiteAuth:
                     
                     for selector_type, selector_value in totp_selectors:
                         try:
-                            totp_field = WebDriverWait(driver, 0.5).until(EC.presence_of_element_located((selector_type, selector_value)))
+                    totp_field = WebDriverWait(driver, 2).until(EC.presence_of_element_located((selector_type, selector_value)))
                             logger.info("Found TOTP field using %s: %s", selector_type, selector_value)
                             break
                         except Exception:
@@ -456,9 +458,9 @@ class FullyAutomatedKiteAuth:
             except Exception as exc:
                 logger.warning("OAuth approval failed for %s: %s", self.profile_name, exc)
             
-            # Wait for webhook to capture token (reduced timeout since OAuth often auto-approves)
+            # Wait for webhook to capture token (more generous for slower approvals)
             logger.info("Waiting for OAuth redirect capture for %s", self.profile_name)
-            token_data = server.wait_for_token(timeout=10)  # Reduced from 60 to 10 seconds
+            token_data = server.wait_for_token(timeout=60)
             
             if token_data and token_data.get('request_token'):
                 request_token = token_data['request_token']
