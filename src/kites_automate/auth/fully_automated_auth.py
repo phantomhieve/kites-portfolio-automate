@@ -222,6 +222,12 @@ class FullyAutomatedKiteAuth:
             # Setup webdriver
             logger.info("Starting automated browser login for %s", self.profile_name)
             driver = self._setup_webdriver()
+            try:
+                # Ensure a clean session per profile (avoid cross-account bleed)
+                driver.delete_all_cookies()
+                driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
+            except Exception:
+                pass
             
             # Navigate to login page with a more forgiving strategy/timeout
             try:
@@ -370,7 +376,7 @@ class FullyAutomatedKiteAuth:
                     
                     for selector_type, selector_value in totp_selectors:
                         try:
-                            totp_field = WebDriverWait(driver, 2).until(EC.presence_of_element_located((selector_type, selector_value)))
+                            totp_field = WebDriverWait(driver, 6).until(EC.presence_of_element_located((selector_type, selector_value)))
                             logger.info("Found TOTP field using %s: %s", selector_type, selector_value)
                             break
                         except Exception:
