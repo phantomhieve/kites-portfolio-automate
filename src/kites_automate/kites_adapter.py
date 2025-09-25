@@ -135,8 +135,6 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 
                 # Get the validated token from the kites-automate token system
                 # Use dynamic import to avoid relative import issues
-                import sys
-                import importlib
                 token_rotator_module = importlib.import_module('kites_automate.auth.token_rotator')
                 get_valid_token = getattr(token_rotator_module, 'get_valid_token')
                 
