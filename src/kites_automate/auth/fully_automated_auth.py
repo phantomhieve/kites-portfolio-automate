@@ -40,6 +40,18 @@ logger = logging.getLogger(__name__)
 # Shared Firefox driver for the duration of a renewal batch
 _SHARED_DRIVER = None  # type: ignore[var-annotated]
 
+def _shutdown_shared_driver() -> None:
+    """Gracefully shutdown the shared webdriver, if any."""
+    global _SHARED_DRIVER
+    try:
+        if _SHARED_DRIVER is not None:
+            try:
+                _SHARED_DRIVER.quit()
+            except Exception:
+                pass
+    finally:
+        _SHARED_DRIVER = None
+
 
 class FullyAutomatedKiteAuth:
     """Fully automated authentication manager for Kite Connect."""
@@ -127,7 +139,12 @@ class FullyAutomatedKiteAuth:
         """Setup Firefox webdriver with appropriate options."""
         global _SHARED_DRIVER
         if _SHARED_DRIVER is not None:
-            return _SHARED_DRIVER
+            # Verify the existing session is still alive; if not, recreate
+            try:
+                _SHARED_DRIVER.execute_script("return 1")
+                return _SHARED_DRIVER
+            except Exception:
+                _SHARED_DRIVER = None
         firefox_options = Options()
         # Force headless; also works without Xvfb
         firefox_options.add_argument("--headless")
@@ -421,8 +438,7 @@ class FullyAutomatedKiteAuth:
             logger.error("Automated browser login failed for %s: %s", self.profile_name, exc)
             return None
         finally:
-            if driver:
-                driver.quit()
+            # Keep the shared driver alive across profiles for speed and stability
             if server:
                 server.stop()
     
@@ -582,7 +598,10 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
             
     except Exception as exc:
         logger.error("Fully automated token renewal failed: %s", exc)
-    
+    finally:
+        # Cleanup the shared browser session after the batch
+        _shutdown_shared_driver()
+
     return results
 
 
