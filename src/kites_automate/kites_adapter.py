@@ -118,12 +118,32 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 # The automated auth creates tokens as {profile_name}_access_token.txt (preserving case from profiles.json)
                 # So "HUF" becomes "Account1_access_token.txt", not "account1_access_token.txt"
                 token_file = f"{current_account['profile_name']}_access_token.txt"
-                kite_auth = KiteAuthManager(
-                    api_key,
-                    api_secret,
-                    token_file
-                )
-                kite = kite_auth.get_client()
+                
+                # Debug: Check what token files actually exist
+                import os
+                kites_dir = os.path.expanduser("~/.kites")
+                if os.path.exists(kites_dir):
+                    all_files = os.listdir(kites_dir)
+                    logger.info("Files in ~/.kites/: %s", all_files)
+                    logger.info("Looking for token file: %s", token_file)
+                else:
+                    logger.warning("~/.kites directory does not exist")
+                
+                # Instead of using KiteAuthManager (which might fail validation),
+                # use the token that was already validated by the kites-automate system
+                from kiteconnect import KiteConnect
+                kite = KiteConnect(api_key=api_key)
+                
+                # Get the validated token from the kites-automate token system
+                from ..auth.token_rotator import get_valid_token
+                valid_token = get_valid_token(ctx, account)
+                if not valid_token:
+                    logger.error("No valid token available for %s", account_name)
+                    return
+                
+                # Set the token directly (bypassing KiteAuthManager validation)
+                kite.set_access_token(valid_token)
+                logger.info("Using validated token for %s (bypassing KiteAuthManager)", account_name)
                 
                 # Get spreadsheet and worksheet
                 spreadsheet_name = profiles.get("settings", {}).get("spreadsheet_name", "Portfolio")
