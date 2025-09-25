@@ -133,19 +133,32 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 from kiteconnect import KiteConnect
                 kite = KiteConnect(api_key=api_key)
                 
-                # Get the validated token from the kites-automate token system
-                # Use dynamic import to avoid relative import issues
-                token_rotator_module = importlib.import_module('kites_automate.auth.token_rotator')
-                get_valid_token = getattr(token_rotator_module, 'get_valid_token')
+                # Debug: Log API key and account info
+                logger.info("Using API key for %s: %s", account_name, api_key[:10] + "...")
                 
-                valid_token = get_valid_token(ctx, account)
-                if not valid_token:
-                    logger.error("No valid token available for %s", account_name)
+                # Instead of using get_valid_token, read the token directly from the file
+                # that was created by the automated token renewal
+                token_file_path = os.path.expanduser(f"~/.kites/{token_file}")
+                if not os.path.exists(token_file_path):
+                    logger.error("Token file does not exist: %s", token_file_path)
                     return
                 
-                # Set the token directly (bypassing KiteAuthManager validation)
-                kite.set_access_token(valid_token)
-                logger.info("Using validated token for %s (bypassing KiteAuthManager)", account_name)
+                try:
+                    import json
+                    with open(token_file_path, 'r') as f:
+                        token_data = json.load(f)
+                    
+                    if 'access_token' not in token_data:
+                        logger.error("No access_token in token file: %s", token_file_path)
+                        return
+                    
+                    valid_token = token_data['access_token']
+                    kite.set_access_token(valid_token)
+                    logger.info("Using token from file for %s: %s", account_name, valid_token[:10] + "...")
+                    
+                except Exception as exc:
+                    logger.error("Failed to read token file %s: %s", token_file_path, exc)
+                    return
                 
                 # Get spreadsheet and worksheet
                 spreadsheet_name = profiles.get("settings", {}).get("spreadsheet_name", "Portfolio")
