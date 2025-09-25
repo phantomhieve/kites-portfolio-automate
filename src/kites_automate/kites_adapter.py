@@ -115,8 +115,9 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 
                 # Create KiteAuthManager and get client
                 # Use the token file name that matches the automated token generation
-                # The automated auth creates tokens as {profile_name}_access_token.txt (preserving case)
-                token_file = f"{account_name}_access_token.txt"
+                # The automated auth creates tokens as {profile_name}_access_token.txt (preserving case from profiles.json)
+                # So "HUF" becomes "Account1_access_token.txt", not "account1_access_token.txt"
+                token_file = f"{current_account['profile_name']}_access_token.txt"
                 kite_auth = KiteAuthManager(
                     api_key,
                     api_secret,
