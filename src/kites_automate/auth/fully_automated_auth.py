@@ -62,10 +62,10 @@ def _cleanup_between_profiles(profile_index: int, total_profiles: int, base_paus
         import gc
         gc.collect()
         
-        # Kill any orphaned Firefox processes
+        # Only kill orphaned geckodriver processes (less aggressive)
         try:
             import subprocess
-            subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
+            # Only kill geckodriver, not firefox - let it clean up naturally
             subprocess.run(['pkill', '-f', 'geckodriver'], capture_output=True)
         except Exception:
             pass
@@ -246,12 +246,12 @@ class FullyAutomatedKiteAuth:
                     pass
                 self._temp_profile_dir = None
             
-            # Kill any remaining Firefox processes for this profile
+            # Kill only profile-specific Firefox processes (less aggressive)
             try:
                 import subprocess
                 subprocess.run(['pkill', '-f', f'kites_ff_{self.profile_name}'], capture_output=True)
-                subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
-                logger.info("Killed remaining Firefox processes for %s", self.profile_name)
+                # Don't kill all firefox processes - too aggressive for subsequent profiles
+                logger.info("Killed profile-specific Firefox processes for %s", self.profile_name)
             except Exception:
                 pass
             
@@ -273,6 +273,9 @@ class FullyAutomatedKiteAuth:
         
         # Setup virtual display for VM environments
         self._setup_virtual_display()
+        
+        # Add a small delay to let system recover from previous cleanup
+        time.sleep(1)
         
         firefox_options = Options()
         
@@ -367,46 +370,63 @@ class FullyAutomatedKiteAuth:
             "geckodriver"                     # System PATH
         ]
         
-        # Try each geckodriver path with timeout protection
+        # Try each geckodriver path with timeout protection and retry
         for driver_path in geckodriver_paths:
-            try:
-                logger.info("Trying geckodriver at: %s", driver_path)
-                # Suppress geckodriver logs and add timeout
-                service = Service(driver_path, log_output=os.devnull)
-                
-                # Use threading with timeout to prevent system freeze
-                driver_result = [None]
-                driver_error = [None]
-                
-                def init_driver():
-                    try:
-                        driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
-                        driver_result[0].implicitly_wait(1)  # Fast: 1 second only
-                    except Exception as e:
-                        driver_error[0] = e
-                
-                # Start driver initialization in a separate thread
-                import threading
-                driver_thread = threading.Thread(target=init_driver)
-                driver_thread.daemon = True
-                driver_thread.start()
-                
-                # Wait for driver with timeout (30 seconds max)
-                driver_thread.join(timeout=30)
-                
-                if driver_thread.is_alive():
-                    logger.warning("Driver initialization timed out for %s", driver_path)
-                    continue
-                
-                if driver_result[0] is not None:
-                    logger.info("Firefox webdriver initialized via: %s", driver_path)
-                    return driver_result[0]
-                elif driver_error[0]:
-                    logger.warning("Geckodriver path failed %s: %s", driver_path, driver_error[0])
+            # Try up to 2 times per path
+            for attempt in range(2):
+                try:
+                    if attempt > 0:
+                        logger.info("Retrying geckodriver at: %s (attempt %d)", driver_path, attempt + 1)
+                        time.sleep(2)  # Wait before retry
+                    else:
+                        logger.info("Trying geckodriver at: %s", driver_path)
                     
-            except Exception as exc:
-                logger.warning("Geckodriver path failed %s: %s", driver_path, exc)
-                continue
+                    # Suppress geckodriver logs and add timeout
+                    service = Service(driver_path, log_output=os.devnull)
+                    
+                    # Use threading with timeout to prevent system freeze
+                    driver_result = [None]
+                    driver_error = [None]
+                    
+                    def init_driver():
+                        try:
+                            driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
+                            driver_result[0].implicitly_wait(1)  # Fast: 1 second only
+                        except Exception as e:
+                            driver_error[0] = e
+                    
+                    # Start driver initialization in a separate thread
+                    import threading
+                    driver_thread = threading.Thread(target=init_driver)
+                    driver_thread.daemon = True
+                    driver_thread.start()
+                    
+                    # Wait for driver with timeout (45 seconds max - increased for VM)
+                    driver_thread.join(timeout=45)
+                    
+                    if driver_thread.is_alive():
+                        logger.warning("Driver initialization timed out for %s (attempt %d)", driver_path, attempt + 1)
+                        if attempt == 0:
+                            continue  # Try again
+                        else:
+                            break  # Move to next path
+                    
+                    if driver_result[0] is not None:
+                        logger.info("Firefox webdriver initialized via: %s", driver_path)
+                        return driver_result[0]
+                    elif driver_error[0]:
+                        logger.warning("Geckodriver path failed %s: %s (attempt %d)", driver_path, driver_error[0], attempt + 1)
+                        if attempt == 0:
+                            continue  # Try again
+                        else:
+                            break  # Move to next path
+                        
+                except Exception as exc:
+                    logger.warning("Geckodriver path failed %s: %s (attempt %d)", driver_path, exc, attempt + 1)
+                    if attempt == 0:
+                        continue  # Try again
+                    else:
+                        break  # Move to next path
 
         # Fallback: use webdriver-manager to download/manage geckodriver with timeout
         try:
@@ -452,7 +472,7 @@ class FullyAutomatedKiteAuth:
             driver_thread = threading.Thread(target=init_manager_driver)
             driver_thread.daemon = True
             driver_thread.start()
-            driver_thread.join(timeout=30)
+            driver_thread.join(timeout=45)
             
             if driver_thread.is_alive():
                 raise Exception("Driver initialization timed out via webdriver-manager")
