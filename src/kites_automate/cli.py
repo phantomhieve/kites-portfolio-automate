@@ -39,8 +39,9 @@ def main() -> int:
     ctx = RuntimeContext(settings=settings)
 
     if args.command == "run-once":
-        update_portfolio_once(ctx)
-        return 0
+        success_count, total_count, _, _ = update_portfolio_once(ctx)
+        # Non-zero exit if any account failed
+        return 0 if success_count == total_count and total_count > 0 else 1
     if args.command == "run-scheduler":
         start_scheduler(ctx)
         return 0

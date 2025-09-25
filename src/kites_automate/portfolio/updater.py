@@ -48,7 +48,7 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
         return False
 
 
-def update_portfolio_once(ctx: RuntimeContext) -> None:
+def update_portfolio_once(ctx: RuntimeContext):
     base = ctx.settings
     success_count = 0
     total_count = 0
@@ -82,7 +82,7 @@ def update_portfolio_once(ctx: RuntimeContext) -> None:
             logger.error("Update failed: %s", exc)
             failures.append("default")
     
-    # Send single summary email after all updates (always, if at least one succeeded)
+    # Send single summary email after all updates (always, if at least one attempted)
     if total_count > 0:
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         email_tpl = """
@@ -123,3 +123,5 @@ def update_portfolio_once(ctx: RuntimeContext) -> None:
             logger.info("Summary notification sent: %d/%d accounts successful", success_count, total_count)
         except Exception as exc:
             logger.warning("Failed sending summary email: %s", exc)
+    # Return counts so callers can make decisions on exit codes / messages
+    return success_count, total_count, successes, failures
