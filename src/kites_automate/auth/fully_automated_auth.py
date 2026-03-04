@@ -259,6 +259,14 @@ class FullyAutomatedKiteAuth:
             import gc
             gc.collect()
             
+            # Clean up any debug screenshots that may have been left in /tmp
+            try:
+                import glob
+                for stale in glob.glob("/tmp/kites_oauth_*.png"):
+                    os.unlink(stale)
+            except Exception:
+                pass
+            
             # Small delay to let system recover
             time.sleep(0.5)
             
@@ -678,8 +686,17 @@ class FullyAutomatedKiteAuth:
                     logger.info("OAuth authorization approved for %s", self.profile_name)
                 else:
                     logger.warning("Could not find OAuth approval button for %s", self.profile_name)
-                    driver.save_screenshot("/tmp/zerodha_oauth_debug.png")
-                    logger.info("OAuth debug screenshot saved to /tmp/zerodha_oauth_debug.png")
+                    # Save screenshot for debugging then immediately delete (avoid leaving secrets on disk)
+                    import tempfile
+                    _dbg = tempfile.NamedTemporaryFile(prefix="kites_oauth_", suffix=".png", delete=False)
+                    os.chmod(_dbg.name, 0o600)
+                    _dbg.close()
+                    driver.save_screenshot(_dbg.name)
+                    logger.debug("OAuth debug screenshot saved to %s (will be deleted)", _dbg.name)
+                    try:
+                        os.unlink(_dbg.name)
+                    except Exception:
+                        pass
                     
             except Exception as exc:
                 logger.warning("OAuth approval failed for %s: %s", self.profile_name, exc)
