@@ -27,8 +27,8 @@ try:
     from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.firefox.options import Options
-    from selenium.webdriver.firefox.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
     import pyotp
 except ImportError as e:
     raise ImportError(f"Missing dependencies for full automation: {e}. Run: pip install selenium pyotp")
@@ -37,7 +37,7 @@ from .webhook_server import TokenWebhookServer
 
 logger = logging.getLogger(__name__)
 
-# Shared Firefox driver for the duration of a renewal batch
+# Shared Chrome driver for the duration of a renewal batch
 _SHARED_DRIVER = None  # type: ignore[var-annotated]
 
 def _shutdown_shared_driver() -> None:
@@ -265,8 +265,8 @@ class FullyAutomatedKiteAuth:
         except Exception as exc:
             logger.warning("Error during aggressive cleanup for %s: %s", self.profile_name, exc)
     
-    def _setup_webdriver(self) -> webdriver.Firefox:
-        """Setup Firefox webdriver with VM-friendly options and timeout protection."""
+    def _setup_webdriver(self) -> webdriver.Chrome:
+        """Setup Chrome/Chromium webdriver with VM-friendly options and timeout protection."""
         global _SHARED_DRIVER
         # Do not reuse any previous driver to avoid session bleed across profiles
         _SHARED_DRIVER = None
@@ -277,101 +277,41 @@ class FullyAutomatedKiteAuth:
         # Add a small delay to let system recover from previous cleanup
         time.sleep(1)
         
-        firefox_options = Options()
-        
-        # Pure headless configuration - no display needed
-        firefox_options.add_argument("--headless")
-        firefox_options.add_argument("--width=1280")
-        firefox_options.add_argument("--height=720")
-        firefox_options.add_argument("--no-sandbox")
-        firefox_options.add_argument("--disable-dev-shm-usage")
-        firefox_options.add_argument("--disable-gpu")
-        firefox_options.add_argument("--disable-extensions")
-        firefox_options.add_argument("--disable-background-timer-throttling")
-        firefox_options.add_argument("--disable-backgrounding-occluded-windows")
-        firefox_options.add_argument("--disable-renderer-backgrounding")
-        firefox_options.add_argument("--disable-web-security")  # Headless optimization
-        firefox_options.add_argument("--disable-features=VizDisplayCompositor")  # Headless optimization
-        
-        # Start in private browsing to isolate per-profile sessions
-        firefox_options.set_preference("browser.privatebrowsing.autostart", True)
-        
-        # Create a unique temporary profile directory for this run to ensure isolation
+        chrome_options = Options()
+
+        # Pure headless configuration
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--window-size=1280,720")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument("--incognito")  # Per-profile isolation
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-images")
+        chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+        chrome_options.add_argument("--mute-audio")
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=256")
+        chrome_options.add_argument("--disk-cache-size=0")
+        chrome_options.add_argument("--media-cache-size=0")
+
+        # Create a unique temporary user data dir for isolation
         self._temp_profile_dir = None
         try:
             import tempfile
-            self._temp_profile_dir = tempfile.mkdtemp(prefix=f"kites_ff_{self.profile_name}_")
-            # Ensure no remote reuse and force explicit profile
-            firefox_options.add_argument("-no-remote")
-            firefox_options.add_argument("-profile")
-            firefox_options.add_argument(self._temp_profile_dir)
+            self._temp_profile_dir = tempfile.mkdtemp(prefix=f"kites_chr_{self.profile_name}_")
+            chrome_options.add_argument(f"--user-data-dir={self._temp_profile_dir}")
         except Exception:
             self._temp_profile_dir = None
-        
-        # VM-optimized performance settings
-        firefox_options.set_preference("dom.webdriver.enabled", False)
-        firefox_options.set_preference("useAutomationExtension", False)
-        firefox_options.set_preference("permissions.default.image", 2)  # Disable images
-        firefox_options.set_preference("permissions.default.stylesheet", 2)  # Disable CSS
-        firefox_options.set_preference("permissions.default.plugin", 2)  # Disable plugins
-        firefox_options.set_preference("javascript.enabled", True)  # Keep JS for form submission
-        firefox_options.set_preference("dom.ipc.plugins.enabled.libflashplayer.so", False)
-        firefox_options.set_preference("media.volume_scale", "0.0")  # Mute audio
-        
-        # Memory-conscious network settings for VMs
-        firefox_options.set_preference("network.http.pipelining", True)
-        firefox_options.set_preference("network.http.pipelining.maxrequests", 4)  # Reduced from 8
-        firefox_options.set_preference("content.notify.interval", 1000000)  # Increased for VM
-        firefox_options.set_preference("content.notify.ontimer", True)
-        firefox_options.set_preference("content.switch.threshold", 1000000)  # Increased for VM
-        firefox_options.set_preference("browser.cache.disk.enable", False)
-        firefox_options.set_preference("browser.cache.memory.enable", False)
-        firefox_options.set_preference("browser.cache.offline.enable", False)
-        firefox_options.set_preference("network.http.use-cache", False)
-        
-        # Headless-optimized stability settings
-        firefox_options.set_preference("browser.tabs.animate", False)
-        firefox_options.set_preference("browser.fullscreen.animateUp", 0)
-        firefox_options.set_preference("browser.panorama.animate_zoom", False)
-        firefox_options.set_preference("general.smoothScroll", False)
-        firefox_options.set_preference("layout.animated-image-limit", 0)
-        firefox_options.set_preference("toolkit.cosmeticAnimations.enabled", False)
-        
-        # Additional headless optimizations
-        firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
-        firefox_options.set_preference("browser.download.useDownloadDir", False)
-        firefox_options.set_preference("browser.shell.checkDefaultBrowser", False)
-        firefox_options.set_preference("browser.startup.page", 0)  # Blank page
-        firefox_options.set_preference("browser.startup.homepage", "about:blank")
-        firefox_options.set_preference("startup.homepage_welcome_url", "about:blank")
-        firefox_options.set_preference("startup.homepage_welcome_url.additional", "about:blank")
-        
-        # Process limits and CPU throttling for headless environments
-        firefox_options.set_preference("dom.max_script_run_time", 30)  # Prevent hanging scripts
-        firefox_options.set_preference("dom.max_chrome_script_run_time", 30)
-        firefox_options.set_preference("dom.ipc.processCount", 1)  # Single process for headless
-        
-        # CPU and memory throttling
-        firefox_options.set_preference("browser.cache.memory.capacity", 65536)  # 64MB max cache
-        firefox_options.set_preference("browser.cache.disk.capacity", 131072)   # 128MB max disk cache
-        firefox_options.set_preference("browser.sessionstore.max_tabs_undo", 0)  # No tab undo
-        firefox_options.set_preference("browser.sessionstore.max_windows_undo", 0)  # No window undo
-        firefox_options.set_preference("browser.sessionstore.interval", 60000)  # 1 minute session save
-        
-        # Reduce CPU usage
-        firefox_options.set_preference("layout.frame_rate", 30)  # Cap frame rate
-        firefox_options.set_preference("gfx.webrender.all", False)  # Disable WebRender
-        firefox_options.set_preference("layers.acceleration.disabled", True)  # Disable hardware acceleration
-        # Use system geckodriver (try multiple paths for cross-platform)
-        geckodriver_paths = [
-            "/opt/homebrew/bin/geckodriver",  # macOS Homebrew
-            "/usr/local/bin/geckodriver",     # Linux manual install
-            "/usr/bin/geckodriver",           # Linux package manager
-            "geckodriver"                     # System PATH
-        ]
-        
-        # Try each geckodriver path with timeout protection and retry
-        for driver_path in geckodriver_paths:
+
+        # Try system chromedriver paths
+        for driver_path in ["/usr/bin/chromedriver", "/usr/local/bin/chromedriver", "chromedriver"]:
             # Try up to 2 times per path
             for attempt in range(2):
                 try:
@@ -390,7 +330,7 @@ class FullyAutomatedKiteAuth:
                     
                     def init_driver():
                         try:
-                            driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
+                            driver_result[0] = webdriver.Chrome(service=service, options=chrome_options)
                             driver_result[0].implicitly_wait(1)  # Fast: 1 second only
                         except Exception as e:
                             driver_error[0] = e
@@ -412,7 +352,7 @@ class FullyAutomatedKiteAuth:
                             break  # Move to next path
                     
                     if driver_result[0] is not None:
-                        logger.info("Firefox webdriver initialized via: %s", driver_path)
+                        logger.info("Chrome webdriver initialized via: %s", driver_path)
                         return driver_result[0]
                     elif driver_error[0]:
                         logger.warning("Geckodriver path failed %s: %s (attempt %d)", driver_path, driver_error[0], attempt + 1)
@@ -464,7 +404,7 @@ class FullyAutomatedKiteAuth:
             
             def init_manager_driver():
                 try:
-                    driver_result[0] = webdriver.Firefox(service=service, options=firefox_options)
+                    driver_result[0] = webdriver.Chrome(service=service, options=chrome_options)
                     driver_result[0].implicitly_wait(1)
                 except Exception as e:
                     driver_error[0] = e
@@ -478,7 +418,7 @@ class FullyAutomatedKiteAuth:
                 raise Exception("Driver initialization timed out via webdriver-manager")
             
             if driver_result[0] is not None:
-                logger.info("Firefox webdriver initialized via webdriver-manager")
+                logger.info("Chrome webdriver initialized via webdriver-manager")
                 return driver_result[0]
             else:
                 raise Exception(f"Driver init failed: {driver_error[0]}")
@@ -486,7 +426,7 @@ class FullyAutomatedKiteAuth:
         except Exception as exc:
             logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
             logger.error("All geckodriver setup attempts failed")
-            raise Exception("Could not initialize Firefox webdriver")
+            raise Exception("Could not initialize Chrome webdriver")
     
     def _automated_browser_login(self, login_url: str, timeout: int = 120) -> Optional[str]:
         """Perform fully automated browser login and capture request token."""

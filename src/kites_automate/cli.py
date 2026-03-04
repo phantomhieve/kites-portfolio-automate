@@ -1,6 +1,11 @@
 import argparse
 import logging
 import os
+import sys
+
+# Ensure the local embedded `kites_core` can be imported
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../kites_core")))
+
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo

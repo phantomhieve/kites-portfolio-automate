@@ -104,3 +104,7 @@ target/
 logs/
 *.log
 
+# Secrets - never commit these
+credentials.json
+**/credentials.json
+profiles.json
