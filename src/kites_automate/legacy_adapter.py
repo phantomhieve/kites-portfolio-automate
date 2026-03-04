@@ -17,7 +17,7 @@ def _validate_legacy_tokens(ctx: RuntimeContext) -> None:
         logger.info("Legacy mode disabled")
         return
 
-    project_path = legacy.project_path or "/Users/phantomhive/Desktop/Atul/kites"
+    project_path = legacy.project_path or "./kites_core"
     
     if not os.path.exists(project_path):
         logger.error("Legacy project path does not exist: %s", project_path)
@@ -44,7 +44,7 @@ def run_legacy(ctx: RuntimeContext) -> None:
         logger.info("Legacy mode disabled")
         return
 
-    project_path = legacy.project_path or "/Users/phantomhive/Desktop/Atul/kites"
+    project_path = legacy.project_path or "./kites_core"
     module_name = legacy.module_name or "main"
     mode = (legacy.mode or "smart").lower()
 
