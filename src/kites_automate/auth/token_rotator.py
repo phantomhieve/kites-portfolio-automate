@@ -25,10 +25,10 @@ class Token:
 
 def _token_path(account_name: Optional[str] = None) -> str:
     base = os.path.expanduser("~/.kites")
-    if account_name:
-        base = os.path.join(base, account_name)
     os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "token.json")
+    # Use flat files to avoid creating empty subdirectories
+    suffix = f"_{account_name}" if account_name else ""
+    return os.path.join(base, f"token{suffix}.json")
 
 
 def _read_token_from_disk(path: str) -> Optional[Token]:

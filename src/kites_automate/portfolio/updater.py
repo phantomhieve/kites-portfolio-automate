@@ -15,7 +15,8 @@ from ..legacy_adapter import run_legacy
 logger = logging.getLogger(__name__)
 
 
-def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account: Optional[AccountConfig]) -> bool:
+def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account: Optional[AccountConfig]):
+    """Returns (success: bool, adapter_result: dict|None)."""
     local_ctx = RuntimeContext(settings=effective_settings)
 
     try:
@@ -23,29 +24,26 @@ def _update_single(ctx: RuntimeContext, effective_settings: AppSettings, account
         if effective_settings.legacy and effective_settings.legacy.enabled:
             logger.info("Running legacy project for %s", account.name if account else "default")
             run_legacy(local_ctx)
-            
-            # Legacy run completed - summary email will be sent by update_portfolio_once()
             logger.info("Legacy run completed for %s", account.name if account else "default")
-            return True
+            return True, None
 
         token = get_valid_token(local_ctx, account)
         if not token:
             msg = f"No valid token available; aborting portfolio update for {account.name if account else 'default'}"
             logger.error(msg)
-            # Avoid spamming failure emails for token availability; token rotation already emails on failure
-            return False
+            return False, None
 
         adapter = get_adapter(local_ctx)
-        adapter.update_portfolio(local_ctx, token, account)
+        result = adapter.update_portfolio(local_ctx, token, account)
 
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         logger.info("Portfolio updated successfully for %s at %s IST", account.name if account else "default", ist_now)
-        return True
+        return True, result
     except Exception as exc:
         details = f"Account: {account.name if account else 'default'}\nError: {exc}"
         logger.exception("Update failed for %s", account.name if account else "default")
         send_failure_email(local_ctx, subject="Kites portfolio update failed", details=details)
-        return False
+        return False, None
 
 
 def update_portfolio_once(ctx: RuntimeContext):
@@ -54,25 +52,67 @@ def update_portfolio_once(ctx: RuntimeContext):
     total_count = 0
     successes = []
     failures = []
-    
+    # Collect per-profile summaries so we can write the Summary sheet at the end
+    portfolio_summaries = {}
+    _last_sheet_manager = None
+    _last_spreadsheet = None
+    _last_summary_sheet_name = "Summary"
+
     if base.accounts:
         total_count = len(base.accounts)
-        for acct in base.accounts:
+        for i, acct in enumerate(base.accounts):
             eff = AppSettings.build_settings_for_account(base, acct)
             try:
-                ok = _update_single(ctx, eff, acct)
+                ok, result = _update_single(ctx, eff, acct)
                 if ok:
                     success_count += 1
                     successes.append(acct.name)
+                    # Accumulate summary data from the adapter result
+                    if result and isinstance(result, dict):
+                        profile_name = result.get("profile_name", acct.name)
+                        if result.get("summary") is not None:
+                            portfolio_summaries[profile_name] = result["summary"]
+                        if result.get("sheet_manager"):
+                            _last_sheet_manager = result["sheet_manager"]
+                        if result.get("spreadsheet"):
+                            _last_spreadsheet = result["spreadsheet"]
+                        if result.get("summary_sheet_name"):
+                            _last_summary_sheet_name = result["summary_sheet_name"]
                 else:
                     failures.append(acct.name)
             except Exception as exc:
                 logger.error("Update failed for %s: %s", acct.name, exc)
                 failures.append(acct.name)
+            # Delay between accounts to avoid Google Sheets write quota (429)
+            if i < total_count - 1:
+                import time
+                logger.info("Waiting 15 seconds before next account to avoid rate limits...")
+                time.sleep(15)
+
+        # Write the Summary sheet once all profiles are done
+        if portfolio_summaries and _last_sheet_manager and _last_spreadsheet:
+            try:
+                import time
+                import importlib
+                logger.info("Waiting 5 seconds before writing Summary sheet...")
+                time.sleep(5)
+                logger.info("Writing Summary sheet with %d profile(s)...", len(portfolio_summaries))
+                # Import SummaryManager from kites_core
+                summary_mod = importlib.import_module("kites.sheets")
+                SummaryManager = getattr(summary_mod, "SummaryManager")
+                summary_manager = SummaryManager(_last_sheet_manager)
+                summary_ws = _last_sheet_manager.get_or_create_worksheet(_last_spreadsheet, _last_summary_sheet_name)
+                overall = summary_manager.update_summary_sheet(summary_ws, portfolio_summaries, force_formatting=False)
+                if overall:
+                    logger.info("Summary sheet updated. Total value: %s", getattr(overall, "total_current_value", "N/A"))
+                else:
+                    logger.info("Summary sheet updated.")
+            except Exception as exc:
+                logger.warning("Summary sheet update failed: %s", exc)
     else:
         total_count = 1
         try:
-            ok = _update_single(ctx, base, None)
+            ok, _ = _update_single(ctx, base, None)
             if ok:
                 success_count += 1
                 successes.append("default")
@@ -81,7 +121,7 @@ def update_portfolio_once(ctx: RuntimeContext):
         except Exception as exc:
             logger.error("Update failed: %s", exc)
             failures.append("default")
-    
+
     # Send single summary email after all updates (always, if at least one attempted)
     if total_count > 0:
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()

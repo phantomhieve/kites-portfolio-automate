@@ -29,7 +29,7 @@ accounts:
 
 legacy:
   enabled: false
-  project_path: "/home/phantomhive/kites-automate"
+  project_path: "./kites_core"
   module_name: "main"
   mode: "smart"  # smart|minimal|force_format|show_status|reset_state
-  env_file: "/home/phantomhive/kites-automate/.env"
+  env_file: "./kites_core/.env"

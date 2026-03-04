@@ -13,7 +13,7 @@ class BaseKitesAdapter:
     def authenticate(self, ctx: RuntimeContext) -> Tuple[Optional[str], Optional[int]]:
         raise NotImplementedError
 
-    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
+    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> Optional[dict]:
         raise NotImplementedError
 
 
@@ -66,7 +66,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
             logger.warning("Local kites adapter auth failed: %s", exc)
         return None, None
 
-    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> None:
+    def update_portfolio(self, ctx: RuntimeContext, token: str, account: Optional[AccountConfig] = None) -> Optional[dict]:
         try:
             client = self._ensure_client(ctx)
             
@@ -74,10 +74,14 @@ class LocalKitesAdapter(BaseKitesAdapter):
             if self.client_class == "PortfolioManager":
                 logger.info("Updating portfolio using PortfolioManager with Kite API")
                 
-                # Get the legacy project path for credentials and profiles
-                legacy_path = ctx.settings.legacy.project_path or "/home/phantomhive/kites-automate"
+                # Get the legacy project path (kites_core/) for credentials
+                legacy_path = ctx.settings.legacy.project_path or "."
                 credentials_path = os.path.join(legacy_path, "credentials.json")
-                profiles_path = os.path.join(legacy_path, "profiles.json")
+                # profiles.json lives at the project root (parent of kites_core/)
+                project_root = os.path.abspath(os.path.join(legacy_path, ".."))
+                profiles_path_root = os.path.join(project_root, "profiles.json")
+                profiles_path_legacy = os.path.join(legacy_path, "profiles.json")
+                profiles_path = profiles_path_root if os.path.exists(profiles_path_root) else profiles_path_legacy
                 
                 # Load profiles to get account information
                 import json
@@ -114,23 +118,6 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 
                 # Create SheetManager
                 sheet_manager = SheetManager(credentials_path)
-                
-                # Create KiteAuthManager and get client
-                # Use the token file name that matches the automated token generation
-                # The automated auth creates tokens as {profile_name}_access_token.txt (preserving case from profiles.json)
-                # So "HUF" becomes "Account1_access_token.txt", not "account1_access_token.txt"
-                token_file = f"{current_account['profile_name']}_access_token.txt"
-                
-                # Debug: Check what token files actually exist
-                kites_dir = os.path.expanduser("~/.kites")
-                if os.path.exists(kites_dir):
-                    all_files = os.listdir(kites_dir)
-                    logger.info("Files in ~/.kites/: %s", all_files)
-                    logger.info("Looking for token file: %s", token_file)
-                else:
-                    logger.warning("~/.kites directory does not exist")
-                
-                # Use the token provided by the orchestrator (already selected/rotated)
                 from kiteconnect import KiteConnect
                 kite = KiteConnect(api_key=api_key)
                 
@@ -161,11 +148,19 @@ class LocalKitesAdapter(BaseKitesAdapter):
                     worksheet,
                     kite.holdings(),
                     kite.mf_holdings(),
-                    force_formatting=False
+                    force_formatting=False,
+                    exception_list=current_account.get("exception_list")
                 )
                 
                 logger.info("Portfolio updated successfully using PortfolioManager")
-                return
+                # Return summary so the orchestrator can aggregate and write the Summary sheet
+                return {
+                    "profile_name": current_account["profile_name"],
+                    "summary": summary,
+                    "sheet_manager": sheet_manager,
+                    "spreadsheet": spreadsheet,
+                    "summary_sheet_name": profiles.get("settings", {}).get("summary_sheet_name", "Summary"),
+                }
             
             # Try the standard update_portfolio method for other client types
             if hasattr(client, 'update_portfolio'):
@@ -176,6 +171,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
             logger.warning("Local kites adapter portfolio update failed: %s", exc)
             # Re-raise so callers can mark the update as failed
             raise
+        return None
 
 
 class RestKitesAdapter(BaseKitesAdapter):
@@ -189,7 +185,7 @@ class RestKitesAdapter(BaseKitesAdapter):
 
 def get_adapter(ctx: RuntimeContext) -> BaseKitesAdapter:
     # Try to use local codebase if provided
-    local_path = os.environ.get("KITES_LOCAL_PATH", "/home/phantomhive/kites-automate")
+    local_path = os.environ.get("KITES_LOCAL_PATH", ".")
     module_name = os.environ.get("KITES_LOCAL_MODULE", "kites_client")
     client_class = os.environ.get("KITES_LOCAL_CLIENT_CLASS", "KitesClient")
     factory_spec = os.environ.get("KITES_LOCAL_FACTORY")  # format: module:function
