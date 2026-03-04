@@ -66,7 +66,7 @@ def _cleanup_between_profiles(profile_index: int, total_profiles: int, base_paus
         try:
             import subprocess
             # Only kill geckodriver, not firefox - let it clean up naturally
-            subprocess.run(['pkill', '-f', 'geckodriver'], capture_output=True)
+            subprocess.run(['pkill', '-f', 'chromedriver'], capture_output=True)
         except Exception:
             pass
         
@@ -74,7 +74,7 @@ def _cleanup_between_profiles(profile_index: int, total_profiles: int, base_paus
         try:
             import tempfile
             import glob
-            temp_pattern = os.path.join(tempfile.gettempdir(), "kites_ff_*")
+            temp_pattern = os.path.join(tempfile.gettempdir(), "kites_chr_*")
             for temp_dir in glob.glob(temp_pattern):
                 try:
                     import shutil
@@ -236,7 +236,7 @@ class FullyAutomatedKiteAuth:
             except Exception:
                 pass
             
-            # Cleanup temporary Firefox profile directory
+            # Cleanup temporary Chrome profile directory
             if getattr(self, "_temp_profile_dir", None):
                 try:
                     import shutil
@@ -246,11 +246,11 @@ class FullyAutomatedKiteAuth:
                     pass
                 self._temp_profile_dir = None
             
-            # Kill only profile-specific Firefox processes (less aggressive)
+            # Kill only profile-specific Chrome processes (less aggressive)
             try:
                 import subprocess
-                subprocess.run(['pkill', '-f', f'kites_ff_{self.profile_name}'], capture_output=True)
-                # Don't kill all firefox processes - too aggressive for subsequent profiles
+                subprocess.run(['pkill', '-f', f'kites_chr_{self.profile_name}'], capture_output=True)
+                # Don't kill all chrome processes - too aggressive for subsequent profiles
                 logger.info("Killed profile-specific Firefox processes for %s", self.profile_name)
             except Exception:
                 pass
