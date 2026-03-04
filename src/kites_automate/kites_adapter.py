@@ -35,7 +35,7 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 # Import SheetManager from the same module
                 sheet_manager_cls = getattr(mod, "SheetManager")
                 # Create SheetManager with credentials file path
-                credentials_path = os.path.join(ctx.settings.legacy.project_path or "/home/phantomhive/kites-automate", "credentials.json")
+                credentials_path = os.path.join(ctx.settings.legacy.project_path or "./kites_core", "credentials.json")
                 sheet_manager = sheet_manager_cls(credentials_path)
                 # Create PortfolioManager with SheetManager
                 self._client = client_cls(sheet_manager)
