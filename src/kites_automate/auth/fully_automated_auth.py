@@ -250,8 +250,21 @@ class FullyAutomatedKiteAuth:
             try:
                 import subprocess
                 subprocess.run(['pkill', '-f', f'kites_chr_{self.profile_name}'], capture_output=True)
-                # Don't kill all chrome processes - too aggressive for subsequent profiles
-                logger.info("Killed profile-specific Firefox processes for %s", self.profile_name)
+                logger.info("Killed profile-specific Chrome processes for %s", self.profile_name)
+            except Exception:
+                pass
+
+            # Tear down Xvfb virtual display — don't leave it running between profiles
+            try:
+                xvfb = getattr(self, "_xvfb_process", None)
+                if xvfb is not None:
+                    xvfb.terminate()
+                    xvfb.wait(timeout=3)
+                    self._xvfb_process = None
+                    logger.info("Xvfb stopped for %s", self.profile_name)
+                else:
+                    # Kill any orphaned Xvfb on :99 as a safety net
+                    subprocess.run(['pkill', '-f', 'Xvfb :99'], capture_output=True)
             except Exception:
                 pass
             
