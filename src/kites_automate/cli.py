@@ -57,7 +57,13 @@ def main() -> int:
         # Load profiles config for automated renewal
         try:
             import json
-            profiles_path = os.path.join(ctx.settings.legacy.project_path or ".", "profiles.json")
+            legacy_path = ctx.settings.legacy.project_path or "."
+            project_root = os.path.abspath(os.path.join(legacy_path, ".."))
+            profiles_path = (
+                os.path.join(project_root, "profiles.json")
+                if os.path.exists(os.path.join(project_root, "profiles.json"))
+                else os.path.join(legacy_path, "profiles.json")
+            )
             if os.path.exists(profiles_path):
                 with open(profiles_path, 'r') as f:
                     profiles_config = json.load(f)
