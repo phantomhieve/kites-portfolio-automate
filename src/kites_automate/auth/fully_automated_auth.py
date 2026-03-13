@@ -337,12 +337,12 @@ class FullyAutomatedKiteAuth:
             for attempt in range(2):
                 try:
                     if attempt > 0:
-                        logger.info("Retrying geckodriver at: %s (attempt %d)", driver_path, attempt + 1)
+                        logger.info("Retrying chromedriver at: %s (attempt %d)", driver_path, attempt + 1)
                         time.sleep(2)  # Wait before retry
                     else:
-                        logger.info("Trying geckodriver at: %s", driver_path)
+                        logger.info("Trying chromedriver at: %s", driver_path)
                     
-                    # Suppress geckodriver logs and add timeout
+                    # Suppress chromedriver logs and add timeout
                     service = Service(driver_path, log_output=os.devnull)
                     
                     # Use threading with timeout to prevent system freeze
@@ -375,24 +375,24 @@ class FullyAutomatedKiteAuth:
                     if driver_result[0] is not None:
                         logger.info("Chrome webdriver initialized via: %s", driver_path)
                         return driver_result[0]
-                    elif driver_error[0]:
-                        logger.warning("Geckodriver path failed %s: %s (attempt %d)", driver_path, driver_error[0], attempt + 1)
+                        logger.warning("Chromedriver path failed %s: %s (attempt %d)", driver_path, driver_error[0], attempt + 1)
                         if attempt == 0:
                             continue  # Try again
                         else:
                             break  # Move to next path
                         
                 except Exception as exc:
-                    logger.warning("Geckodriver path failed %s: %s (attempt %d)", driver_path, exc, attempt + 1)
+                    logger.warning("Chromedriver path failed %s: %s (attempt %d)", driver_path, exc, attempt + 1)
                     if attempt == 0:
                         continue  # Try again
                     else:
                         break  # Move to next path
 
-        # Fallback: use webdriver-manager to download/manage geckodriver with timeout
+        # Fallback: use webdriver-manager to download/manage chromedriver with timeout
         try:
-            from webdriver_manager.firefox import GeckoDriverManager
-            logger.info("Attempting geckodriver setup via webdriver-manager")
+            from webdriver_manager.chrome import ChromeDriverManager
+            logger.info("Attempting chromedriver setup via webdriver-manager")
+
             
             # Download with timeout
             manager_result = [None]
@@ -400,7 +400,7 @@ class FullyAutomatedKiteAuth:
             
             def download_manager():
                 try:
-                    manager_result[0] = GeckoDriverManager().install()
+                    manager_result[0] = ChromeDriverManager().install()
                 except Exception as e:
                     manager_error[0] = e
             
@@ -445,8 +445,8 @@ class FullyAutomatedKiteAuth:
                 raise Exception(f"Driver init failed: {driver_error[0]}")
                 
         except Exception as exc:
-            logger.error("webdriver-manager failed to provision geckodriver: %s", exc)
-            logger.error("All geckodriver setup attempts failed")
+            logger.error("webdriver-manager failed to provision chromedriver: %s", exc)
+            logger.error("All chromedriver setup attempts failed")
             raise Exception("Could not initialize Chrome webdriver")
     
     def _automated_browser_login(self, login_url: str, timeout: int = 120) -> Optional[str]:
