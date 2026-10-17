@@ -8,6 +8,9 @@ FORBIDDEN_PATTERNS='(\.env$|\.env\..*|credentials\.json$|profiles\.json$|\.key\.
 STAGED_FILES=$(git diff --cached --name-only)
 
 for file in $STAGED_FILES; do
+    if [ "$file" = ".env.example" ]; then
+        continue
+    fi
     if echo "$file" | grep -Eq "$FORBIDDEN_PATTERNS"; then
         echo "❌ ERROR: Attempting to commit forbidden secret/credential file: $file"
         echo "Please unstage this file immediately before committing."
