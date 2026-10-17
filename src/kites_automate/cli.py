@@ -60,7 +60,9 @@ def create_parser() -> argparse.ArgumentParser:
     p_run_once.add_argument("--account", "-a", type=str, default=None, help="Update specific account name only")
 
     # auto-renew-tokens
-    sub.add_parser("auto-renew-tokens", help="Headless Chromium automated login + TOTP token renewal")
+    p_renew = sub.add_parser("auto-renew-tokens", help="Headless Chromium automated login + TOTP token renewal")
+    p_renew.add_argument("--force", "-f", action="store_true", help="Force browser login even if token appears unexpired")
+    p_renew.add_argument("--account", "-a", type=str, default=None, help="Renew token for specific account only")
 
     # status
     sub.add_parser("status", help="Display system status, token expirations, and recent pipeline run state")
@@ -205,8 +207,13 @@ def main() -> int:
                 print("❌ Credentials configuration not found. Check ~/.kites/credentials.json")
                 return 1
 
-            print("🤖 Starting automated headless Chromium token renewal...")
-            results = fully_automated_token_renewal(profiles_config, credentials_config)
+            force = getattr(args, "force", False)
+            account = getattr(args, "account", None)
+            target_desc = f"account '{account}'" if account else "all configured accounts"
+            print(f"🤖 Starting automated headless Chromium token renewal for {target_desc} (force={force})...")
+            results = fully_automated_token_renewal(
+                profiles_config, credentials_config, force=force, target_account=account
+            )
 
             success_count = sum(1 for token in results.values() if token)
             total_count = len(results)

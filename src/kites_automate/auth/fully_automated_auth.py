@@ -110,17 +110,17 @@ class FullyAutomatedKiteAuth:
         self.totp_secret = totp_secret
         self.token_file = os.path.expanduser(f"~/.kites/{profile_name}_access_token.txt")
         
-    def get_valid_token(self) -> Optional[str]:
+    def get_valid_token(self, force: bool = False) -> Optional[str]:
         """Get a valid access token, fully automated renewal if necessary."""
         # Check if we have a valid token
-        if self._is_token_valid():
+        if not force and self._is_token_valid():
             token_data = self._load_token()
             if token_data:
                 logger.info("Using existing valid token for %s", self.profile_name)
                 return token_data.get('access_token')
         
-        # Token is expired or missing - attempt fully automated renewal
-        logger.info("Token expired or missing for %s, starting fully automated renewal", self.profile_name)
+        # Token is expired, missing, or renewal forced
+        logger.info("Token renewal initiated for %s (force=%s)", self.profile_name, force)
         return self._fully_automated_renewal()
     
     def _is_token_valid(self) -> bool:
@@ -129,7 +129,29 @@ class FullyAutomatedKiteAuth:
             token_data = self._load_token()
             if not token_data or 'expires_at' not in token_data:
                 return False
-            
+
+            # Zerodha cutoff: Kite resets all access tokens daily at 06:00 AM IST
+            try:
+                from zoneinfo import ZoneInfo
+                ist = ZoneInfo("Asia/Kolkata")
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+                ist = ZoneInfo("Asia/Kolkata")
+
+            now_ist = datetime.now(ist)
+            cutoff_ist = now_ist.replace(hour=6, minute=0, second=0, microsecond=0)
+            created_str = token_data.get('created_at')
+            if created_str:
+                try:
+                    created_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=ist)
+                    if now_ist >= cutoff_ist and created_dt < cutoff_ist:
+                        logger.info("Token for %s expired at 06:00 AM IST daily Zerodha reset", self.profile_name)
+                        return False
+                except Exception:
+                    pass
+
             expires_str = token_data['expires_at']
             expires_dt = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
             
@@ -851,13 +873,20 @@ class FullyAutomatedKiteAuth:
             return None
 
 
-def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_config: Dict[str, Any]) -> Dict[str, Optional[str]]:
+def fully_automated_token_renewal(
+    profiles_config: Dict[str, Any],
+    credentials_config: Dict[str, Any],
+    force: bool = False,
+    target_account: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
     """
-    Perform fully automated token renewal for all profiles.
+    Perform fully automated token renewal for all or specified profiles.
     
     Args:
         profiles_config: Dictionary containing profile configurations
         credentials_config: Dictionary containing login credentials and TOTP secrets
+        force: If True, bypass cache and force browser renewal
+        target_account: If provided, only renew token for this profile name
         
     Returns:
         Dictionary mapping profile names to access tokens (or None if failed)
@@ -872,6 +901,12 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
         except Exception:
             pause_seconds = 2.0
         
+        # Filter profiles if target_account specified
+        if target_account:
+            profiles = [p for p in profiles if str(p.get("profile_name", "")).lower() == target_account.lower()]
+            if not profiles:
+                logger.warning("No profile matching target_account '%s' found", target_account)
+
         # Process profiles with resource management
         for i, profile in enumerate(profiles):
             profile_name = profile.get('profile_name')
@@ -902,13 +937,13 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
                 continue
             
             # Attempt fully automated renewal
-            logger.info("🤖 Starting fully automated renewal for %s", profile_name)
+            logger.info("🤖 Starting fully automated renewal for %s (force=%s)", profile_name, force)
             auth_manager = FullyAutomatedKiteAuth(
                 api_key, api_secret, profile_name, 
                 username, password, totp_secret
             )
             
-            access_token = auth_manager.get_valid_token()
+            access_token = auth_manager.get_valid_token(force=force)
             results[profile_name] = access_token
             
             if access_token:
