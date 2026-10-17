@@ -8,7 +8,7 @@ from typing import Optional
 
 from ..config import RuntimeContext, AppSettings, AccountConfig
 from ..auth.token_rotator import get_valid_token
-from ..notify.emailer import send_email, send_failure_email
+from ..notify.emailer import send_email, send_failure_email, is_email_configured
 from ..kites_adapter import get_adapter
 from ..legacy_adapter import run_legacy
 
@@ -147,21 +147,27 @@ def update_portfolio_once(ctx: RuntimeContext):
         {% endif %}
         <p>Check your Google Sheets for the latest data.</p>
         """
-        try:
-            send_email(
-                ctx,
-                subject="Kites Portfolio Update Summary",
-                template_str=email_tpl,
-                context={
-                    "ts": ist_now,
-                    "success_count": str(success_count),
-                    "total_count": str(total_count),
-                    "successes": successes,
-                    "failures": failures,
-                },
+        if not is_email_configured(ctx):
+            logger.warning(
+                "SMTP/addresses not configured; skipping summary email. "
+                "Set SMTP_HOST, EMAIL_FROM, and EMAIL_TO in .env."
             )
-            logger.info("Summary notification sent: %d/%d accounts successful", success_count, total_count)
-        except Exception as exc:
-            logger.warning("Failed sending summary email: %s", exc)
+        else:
+            try:
+                send_email(
+                    ctx,
+                    subject="Kites Portfolio Update Summary",
+                    template_str=email_tpl,
+                    context={
+                        "ts": ist_now,
+                        "success_count": str(success_count),
+                        "total_count": str(total_count),
+                        "successes": successes,
+                        "failures": failures,
+                    },
+                )
+                logger.info("Summary notification sent: %d/%d accounts successful", success_count, total_count)
+            except Exception as exc:
+                logger.warning("Failed sending summary email: %s", exc)
     # Return counts so callers can make decisions on exit codes / messages
     return success_count, total_count, successes, failures

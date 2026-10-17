@@ -2,6 +2,10 @@ import argparse
 import logging
 import os
 import sys
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Ensure the local embedded `kites_core` can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../kites_core")))
@@ -13,6 +17,7 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 from .config import AppSettings, RuntimeContext
+from .sync_state import write_pipeline_state
 from .logging_setup import setup_logging
 from .scheduler.schedule import start_scheduler
 from .portfolio.updater import update_portfolio_once
@@ -37,6 +42,9 @@ def create_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     setup_logging(logging.INFO)
+    # Load .env into os.environ so profiles.json api_key_env / api_secret_env resolve (not only Pydantic fields).
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    load_dotenv(os.path.join(_root, ".env"))
     parser = create_parser()
     args = parser.parse_args()
 
@@ -46,7 +54,21 @@ def main() -> int:
     if args.command == "run-once":
         success_count, total_count, _, _ = update_portfolio_once(ctx)
         # Non-zero exit if any account failed
-        return 0 if success_count == total_count and total_count > 0 else 1
+        rc = 0 if success_count == total_count and total_count > 0 else 1
+        try:
+            log_dir = Path(_root) / "logs"
+            write_pipeline_state(
+                log_dir,
+                epoch_seconds=int(time.time()),
+                success=(rc == 0),
+                run_mode="portfolio_only",
+                token_exit=None,
+                portfolio_exit=rc,
+                aggregate_exit=rc,
+            )
+        except OSError:
+            logging.getLogger(__name__).warning("Could not persist last_pipeline_state.json", exc_info=True)
+        return rc
     if args.command == "run-scheduler":
         start_scheduler(ctx)
         return 0

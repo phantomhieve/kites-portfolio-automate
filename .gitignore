@@ -83,9 +83,17 @@ target/
 *.service
 *.timer
 
-# Environment variables
-*.env
+# Environment variables & secrets
+.env
 .env.*
+*.env
+credentials.json
+**/credentials.json
+profiles.json
+**/profiles.json
+*.key.json
+*.pem
+*.pfx
 
 # IDEs
 .idea/
@@ -99,12 +107,11 @@ target/
 **/*.secret.yml
 **/*.secret.yaml
 **/*.secret.json
+.*_formatting_state.json
+last_pipeline_state.json
+*.tmp
 
 # Logs
 logs/
 *.log
 
-# Secrets - never commit these
-credentials.json
-**/credentials.json
-profiles.json

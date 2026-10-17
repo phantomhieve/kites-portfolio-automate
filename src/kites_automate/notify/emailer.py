@@ -10,6 +10,12 @@ from ..config import RuntimeContext
 logger = logging.getLogger(__name__)
 
 
+def is_email_configured(ctx: RuntimeContext) -> bool:
+    """True only when SMTP and addresses are present (values may still be invalid)."""
+    cfg = ctx.settings.email
+    return bool(cfg.smtp_host and cfg.email_from and cfg.email_to)
+
+
 def send_email(ctx: RuntimeContext, subject: str, template_str: str, context: Dict[str, str]) -> None:
     email_cfg = ctx.settings.email
 

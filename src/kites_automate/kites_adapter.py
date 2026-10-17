@@ -121,14 +121,17 @@ class LocalKitesAdapter(BaseKitesAdapter):
                 from kiteconnect import KiteConnect
                 kite = KiteConnect(api_key=api_key)
                 
-                logger.info("Using API key for %s: %s", account_name, api_key[:10] + "...")
-                logger.info("Environment API key for %s: %s", current_account['api_key_env'], api_key[:10] + "...")
+                logger.info("Using API key for %s (len=%s)", account_name, len(api_key or ""))
+                logger.info(
+                    "Environment API key resolved for %s",
+                    current_account["api_key_env"],
+                )
                 
                 if not token:
                     raise RuntimeError(f"No token provided for {account_name}")
                 
                 kite.set_access_token(token)
-                logger.info("Using token passed from orchestrator for %s: %s", account_name, token[:10] + "...")
+                logger.info("Using access token passed from orchestrator for %s (len=%s)", account_name, len(token or ""))
                 
                 # Validate token with a lightweight call
                 try:
