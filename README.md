@@ -135,6 +135,9 @@ python -m src.kites_automate.cli auto-renew-tokens --account Account1
 # Run portfolio synchronization for all configured accounts
 python -m src.kites_automate.cli run
 
+# Run portfolio sync and force re-applying all formatting and styles
+python -m src.kites_automate.cli run --force-format
+
 # Run portfolio synchronization for a single account
 python -m src.kites_automate.cli run --account Account1
 
