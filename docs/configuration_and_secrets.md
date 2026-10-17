@@ -34,7 +34,7 @@ Used by both automated headless authentication and the Kite Connect SDK. Co-loca
 
 - **Path**: `~/.kites/credentials.json`
 - **Permissions**: `chmod 700 ~/.kites && chmod 600 ~/.kites/credentials.json`
-- **Template**: [`docs/credentials_template.json`](file:///home/phantomhive/kites-automate-automate/docs/credentials_template.json)
+- **Template**: [`docs/credentials_template.json`](credentials_template.json)
 
 ```json
 {
@@ -63,7 +63,7 @@ Used by the Kite Connect SDK and email notification handlers.
 
 - **Path**: `.env` (at repository root)
 - **Permissions**: `chmod 600 .env`
-- **Template**: [`.env.example`](file:///home/phantomhive/kites-automate-automate/.env.example)
+- **Template**: [`.env.example`](../.env.example)
 
 ```bash
 # Zerodha Kite Connect API Keys & Secrets
@@ -93,7 +93,7 @@ EMAIL_USE_TLS=true
 Maps account names to environment variable keys and Google Sheet settings.
 
 - **Path**: `profiles.json` (at repository root or `~/.kites/profiles.json`)
-- **Template**: [`profiles.json.example`](file:///home/phantomhive/kites-automate-automate/profiles.json.example)
+- **Template**: [`profiles.json.example`](../profiles.json.example)
 
 ```json
 {
