@@ -63,8 +63,28 @@ def _read_automated_token(profile_name: Optional[str] = None) -> Optional[Token]
                 expires_at_iso = data.get("expires_at")
                 if not access or not expires_at_iso:
                     continue
-                # Convert ISO8601 to epoch seconds
                 from datetime import datetime
+                created_at_iso = data.get("created_at")
+                if created_at_iso:
+                    try:
+                        from zoneinfo import ZoneInfo
+                        ist = ZoneInfo("Asia/Kolkata")
+                    except ImportError:
+                        from backports.zoneinfo import ZoneInfo
+                        ist = ZoneInfo("Asia/Kolkata")
+
+                    now_ist = datetime.now(ist)
+                    cutoff_ist = now_ist.replace(hour=6, minute=0, second=0, microsecond=0)
+                    try:
+                        created_dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00"))
+                        if created_dt.tzinfo is None:
+                            created_dt = created_dt.replace(tzinfo=ist)
+                        if now_ist >= cutoff_ist and created_dt < cutoff_ist:
+                            logger.info("Cached token in %s expired at 06:00 AM IST Zerodha reset", fname)
+                            continue
+                    except Exception:
+                        pass
+
                 try:
                     dt = datetime.fromisoformat(expires_at_iso.replace("Z", "+00:00"))
                     exp = dt.timestamp()
