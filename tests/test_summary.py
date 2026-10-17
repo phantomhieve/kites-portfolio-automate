@@ -71,7 +71,7 @@ def test_summary_manager_update_sheet():
     mock_ws.title = "Summary"
 
     portfolio_summaries = {
-        "HUF": PortfolioSummary(stocks_value=100.0, stocks_investment=80.0),
+        "Account1": PortfolioSummary(stocks_value=100.0, stocks_investment=80.0),
     }
 
     overall = mgr.update_summary_sheet(mock_ws, portfolio_summaries, force_formatting=True)
