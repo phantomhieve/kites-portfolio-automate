@@ -1,0 +1,33 @@
+{
+  "profiles": [
+    {
+      "profile_name": "Account1",
+      "api_key_env": "account1_api_key",
+      "api_secret_env": "account1_api_secret",
+      "token_file": "account1_access_token.txt",
+      "description": "Primary trading portfolio",
+      "exception_list": []
+    },
+    {
+      "profile_name": "Account2",
+      "api_key_env": "account2_api_key",
+      "api_secret_env": "account2_api_secret",
+      "token_file": "account2_access_token.txt",
+      "description": "Secondary investment portfolio",
+      "exception_list": []
+    },
+    {
+      "profile_name": "Account3",
+      "api_key_env": "account3_api_key",
+      "api_secret_env": "account3_api_secret",
+      "token_file": "account3_access_token.txt",
+      "description": "Family trust or long-term portfolio",
+      "exception_list": []
+    }
+  ],
+  "settings": {
+    "spreadsheet_name": "Portfolio",
+    "summary_sheet_name": "Summary",
+    "default_update_mode": "smart"
+  }
+}

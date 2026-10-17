@@ -45,10 +45,8 @@ def _resolve_credentials_path(explicit_path: Optional[str] = None) -> str:
         candidates.append(Path(explicit_path))
     candidates.extend([
         Path("credentials.json"),
-        Path("kites_core/credentials.json"),
         Path.home() / ".kites" / "credentials.json",
         Path(__file__).resolve().parent.parent.parent.parent / "credentials.json",
-        Path(__file__).resolve().parent.parent.parent.parent / "kites_core" / "credentials.json",
     ])
     for cand in candidates:
         if cand.is_file():

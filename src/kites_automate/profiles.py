@@ -25,7 +25,6 @@ def find_profiles_file(explicit_path: Optional[str] = None) -> Optional[Path]:
     candidates = [
         Path("profiles.json"),
         Path.home() / ".kites" / "profiles.json",
-        Path("kites_core/profiles.json"),
         Path(__file__).resolve().parent.parent.parent / "profiles.json",
     ]
     for cand in candidates:

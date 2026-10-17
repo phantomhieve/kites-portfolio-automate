@@ -49,7 +49,6 @@ kites-automate/
 │   └── utils/
 │       ├── helpers.py             # Safe float parsing and currency formatting
 │       └── retry.py               # Exponential backoff retry decorator
-├── kites_core/                    # Backward-compatibility shims
 ├── config/defaults.yaml           # Account defaults and configuration
 ├── scripts/
 │   ├── run_scheduled.sh           # Main cron pipeline script
@@ -102,7 +101,7 @@ cp .env.example .env
 # Edit .env with your Zerodha API keys and email configuration
 
 # Create profiles configuration
-cp kites_core/profiles.json.example profiles.json
+cp profiles.json.example profiles.json
 # Edit profiles.json with your profile definitions
 
 # Create Zerodha credentials file for automated login
@@ -135,7 +134,7 @@ python -m src.kites_automate.cli auto-renew-tokens
 python -m src.kites_automate.cli run
 
 # Run portfolio synchronization for a single account
-python -m src.kites_automate.cli run --account HUF
+python -m src.kites_automate.cli run --account Account1
 
 # Send a test email alert
 python -m src.kites_automate.cli send-test-email
