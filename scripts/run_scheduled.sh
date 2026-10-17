@@ -48,7 +48,7 @@ PORT_EXIT=-99
 echo "" | tee -a "$LOG_FILE"
 echo "--- Step 1: Token Renewal ---" | tee -a "$LOG_FILE"
 set +o pipefail
-python3 -m src.kites_automate.cli auto-renew-tokens 2>&1 | tee -a "$LOG_FILE"
+python3 -m src.kites_automate.cli auto-renew-tokens --force 2>&1 | tee -a "$LOG_FILE"
 TOKEN_EXIT=${PIPESTATUS[0]}
 set -o pipefail
 
