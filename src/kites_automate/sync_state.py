@@ -55,6 +55,43 @@ def write_pipeline_state(
         os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass
+    
+    # Best-effort automatic export to Prometheus node_exporter textfile
+    try_export_prometheus_metrics(payload)
+
+
+def try_export_prometheus_metrics(payload: dict) -> None:
+    """Best-effort export of Prometheus node-exporter textfile metric."""
+    prom_str = os.environ.get("KITES_PROM_TEXTFILE", "/var/lib/node-exporter/textfile-collector/kites_automate.prom")
+    prom_path = Path(prom_str)
+    if not prom_path.parent.is_dir():
+        return
+    try:
+        import tempfile
+        success = 1 if payload.get("success") else 0
+        ts = float(payload.get("epoch_seconds", 0))
+        agg = int(payload.get("aggregate_exit", 0 if success else 1))
+        content = (
+            "# HELP kites_automate_last_success 1 if last_pipeline_state.json (or scheduled logs) marks a full successful run.\n"
+            "# TYPE kites_automate_last_success gauge\n"
+            f"kites_automate_last_success {success}\n"
+            "# HELP kites_automate_last_run_timestamp_seconds Unix time (seconds) of the last scheduled run end (machine summary line preferred).\n"
+            "# TYPE kites_automate_last_run_timestamp_seconds gauge\n"
+            f"kites_automate_last_run_timestamp_seconds {ts:g}\n"
+            "# HELP kites_automate_last_exit_code_aggregate 0 on full success else non-zero aggregate exit.\n"
+            "# TYPE kites_automate_last_exit_code_aggregate gauge\n"
+            f"kites_automate_last_exit_code_aggregate {agg}\n"
+        )
+        fd, tmp = tempfile.mkstemp(prefix=".kites_prom_", suffix=".tmp", dir=str(prom_path.parent))
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(content)
+        os.replace(tmp, prom_path)
+        try:
+            os.chmod(prom_path, 0o660)
+        except OSError:
+            pass
+    except Exception:
+        pass
 
 
 def load_pipeline_state(log_dir: Path | str) -> dict | None:

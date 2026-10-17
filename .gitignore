@@ -86,6 +86,7 @@ target/
 # Environment variables & secrets
 .env
 .env.*
+!.env.example
 *.env
 credentials.json
 **/credentials.json
