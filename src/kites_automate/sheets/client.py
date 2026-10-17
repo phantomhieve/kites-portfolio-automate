@@ -39,20 +39,24 @@ SHEETS_RETRY_EXCEPTIONS = (
 
 
 def _resolve_credentials_path(explicit_path: Optional[str] = None) -> str:
-    """Find the credentials.json file in standard locations."""
+    """Find the Google Service Account credentials.json file in standard locations."""
     candidates = []
     if explicit_path:
         candidates.append(Path(explicit_path))
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path:
+        candidates.append(Path(env_path))
     candidates.extend([
+        Path.home() / ".kites" / "google_service_account.json",
+        Path.home() / ".kites" / "sheets_credentials.json",
         Path("credentials.json"),
-        Path.home() / ".kites" / "credentials.json",
         Path(__file__).resolve().parent.parent.parent.parent / "credentials.json",
     ])
     for cand in candidates:
         if cand.is_file():
             return str(cand.resolve())
     # Return explicit_path or default fallback
-    return explicit_path or "credentials.json"
+    return explicit_path or (env_path if env_path else "credentials.json")
 
 
 class SheetManager:

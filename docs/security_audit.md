@@ -61,7 +61,33 @@ A comprehensive security audit of `kites-automate` was conducted to protect real
 
 ---
 
-## 3. Security Checklist for Server Deployment
+### Finding 6: Configuration Proliferation & Service Account Key Collision (HIGH — REMEDIATED)
+- **Vulnerability**: 
+  1. Configs were fragmented across 5 sources (`config/defaults.yaml`, `kites_core/credentials.json`, `~/.kites/credentials.json`, `profiles.json`, `.env`).
+  2. `credentials.json` collision: `~/.kites/credentials.json` was used for Zerodha login passwords, but `client.py` also searched `~/.kites/credentials.json` for Google Cloud Service Account keys, risking fatal parse crashes.
+  3. The production server `.env` had accumulated 14 obsolete legacy variables (`KITES_BASE_URL`, `LEGACY_*`, `KITES_LOCAL_*`).
+- **Remediation**:
+  1. Disambiguated Google Service Account search to `GOOGLE_APPLICATION_CREDENTIALS` and `~/.kites/google_service_account.json`. Removed ambiguous `~/.kites/credentials.json` from Google credentials lookup.
+  2. Unified all trading account credentials (login, TOTP, API key, API secret) directly in `~/.kites/credentials.json` (chmod 600, outside repo).
+  3. Completely deleted `config/defaults.yaml`.
+  4. Consolidated `.env` to minimal runtime operational flags only.
+
+---
+
+## 3. Phantomhive Server Security Posture Audit
+
+| Audit Item | Current State on Server | Risk Evaluation | Action Taken |
+|---|---|---|---|
+| `~/.kites/` Directory | `drwx------` (0700) | Secure (phantomhive user only) | Preserved |
+| `~/.kites/credentials.json` | `-rw-------` (0600) | Secure (phantomhive user only) | Upgraded to hold API keys & secrets |
+| Google Service Account Key | Was inside `kites_core/credentials.json` (0600) | Moderate (buried in legacy repo directory) | Promoted to `~/.kites/google_service_account.json` & `./credentials.json` |
+| Server `.env` | `-rw-------` (0600), 31 variables | Cluttered (14 dead legacy variables) | Pruned dead keys, streamlined to runtime configs |
+| Cron Job (`0 21 * * 1,4`) | Runs `scripts/run_scheduled.sh` headless | Low | Verified wrapper script and log rotation |
+| Subprocess Execution | Previous code passed secrets to `python -c` in CLI | Critical (visible in `ps aux`) | Eliminated via in-process KiteConnect execution |
+
+---
+
+## 4. Security Checklist for Server Deployment
 
 | Check | Requirement | Status |
 |---|---|---|
@@ -71,3 +97,4 @@ A comprehensive security audit of `kites-automate` was conducted to protect real
 | Process Sandboxing | No API keys passed in CLI process arguments | ✅ VERIFIED |
 | Network Retries | Exponential backoff with jitter on Sheets and Kite APIs | ✅ IMPLEMENTED |
 | Browser Teardown | `Xvfb :99` and `chromedriver` cleaned up in `finally` blocks | ✅ IMPLEMENTED |
+| Config Minimalism | 2-artifact architecture (`~/.kites/credentials.json` + clean `.env`) | ✅ HARDENED |
