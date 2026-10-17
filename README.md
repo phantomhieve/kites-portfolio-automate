@@ -66,10 +66,10 @@ kites-automate/
 > [!IMPORTANT]
 > **Super Critical**: This service manages real trading accounts. The production server is self-hosted and isolated. **Never inspect or print `.env`, `credentials.json`, `profiles.json`, or files under `~/.kites/`**.
 
-1. **`~/.kites/credentials.json`**: Contains Zerodha account user IDs, passwords, and TOTP base32 secrets. Stored outside the repository with strict `chmod 600` permissions.
-2. **`credentials.json`**: Google Cloud Service Account private key with Editor permissions on the destination spreadsheet. Ignored by `.gitignore`.
-3. **`.env`**: Stores per-profile API keys and secrets (`<account>_api_key`, `<account>_api_secret`), SMTP credentials, and timezone settings. Ignored by `.gitignore`.
-4. **`profiles.json`**: Maps account profile names to environment variable keys and exclusion lists. Ignored by `.gitignore`.
+1. **`~/.kites/credentials.json` (Unified Vault)**: Contains Zerodha user IDs, passwords, TOTP base32 secrets, API keys, and API secrets. Stored strictly outside version control with `chmod 600` permissions.
+2. **`~/.kites/google_service_account.json` (or `./credentials.json`)**: Google Cloud Service Account private key with Editor permissions on the destination spreadsheet. Ignored by `.gitignore`.
+3. **`.env`**: Stores operational runtime parameters (`TIMEZONE`, `SPREADSHEET_NAME`, `GOOGLE_APPLICATION_CREDENTIALS`, and optional SMTP alerting). Ignored by `.gitignore`.
+4. **`profiles.json` (Optional)**: Maps account profile names to custom sheet display names and exclusion lists. If omitted, accounts are automatically auto-discovered directly from `~/.kites/credentials.json`.
 
 ---
 
@@ -77,8 +77,8 @@ kites-automate/
 
 ### 1. Prerequisites
 - Python 3.13 or 3.14
-- Chromium and Chromedriver installed (or via Snap on Ubuntu)
-- Xvfb (for headless display on Linux)
+- Chromium and Chromedriver installed (or via Snap on Ubuntu Linux)
+- Xvfb (for headless virtual display on Linux)
 
 ### 2. Environment Setup
 ```bash
@@ -95,22 +95,19 @@ pip install -r requirements.txt
 
 ### 3. Configuration Files
 ```bash
-# Create environment file from template
+# Create runtime environment file from template
 cp .env.example .env
-# Edit .env with your Zerodha API keys and email configuration
+# Edit .env with your spreadsheet name and timezone
 
-# Create profiles configuration
-cp profiles.json.example profiles.json
-# Edit profiles.json with your profile definitions
-
-# Create Zerodha credentials file for automated login
+# Create unified credentials vault for automated login & KiteConnect
 mkdir -p ~/.kites
 chmod 700 ~/.kites
 cp docs/credentials_template.json ~/.kites/credentials.json
 chmod 600 ~/.kites/credentials.json
 
 # Place Google Cloud Service Account key
-cp /path/to/service_account.json ./credentials.json
+cp /path/to/service_account.json ~/.kites/google_service_account.json
+chmod 600 ~/.kites/google_service_account.json
 ```
 
 ---
@@ -128,6 +125,12 @@ python -m src.kites_automate.cli test-sheets
 
 # Perform automated headless Chromium login + TOTP token renewal
 python -m src.kites_automate.cli auto-renew-tokens
+
+# Force renewal bypassing cache (e.g. testing full TOTP path)
+python -m src.kites_automate.cli auto-renew-tokens --force
+
+# Renew token for a single specific account only
+python -m src.kites_automate.cli auto-renew-tokens --account Account1
 
 # Run portfolio synchronization for all configured accounts
 python -m src.kites_automate.cli run
