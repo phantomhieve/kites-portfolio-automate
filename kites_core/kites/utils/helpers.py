@@ -1,23 +1,8 @@
 """
-Helper functions for the Kites package.
+Helpers compatibility shim.
+Delegates to unified src.kites_automate.utils.helpers.
 """
 
-from typing import Dict, Any, Union
+from src.kites_automate.utils.helpers import safe_float, format_currency_inr
 
-
-def safe_float(data: Dict[str, Any], key: str) -> float:
-    """
-    Safely extract a float value from a dictionary.
-
-    Args:
-        data: Dictionary to extract from
-        key: Key to extract
-
-    Returns:
-        float: The extracted value or 0.0 if not found/invalid
-    """
-    try:
-        value = data.get(key, 0)
-        return float(value if value is not None else 0)
-    except (ValueError, TypeError):
-        return 0.0 
+__all__ = ["safe_float", "format_currency_inr"]

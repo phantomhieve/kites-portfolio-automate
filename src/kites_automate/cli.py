@@ -1,62 +1,184 @@
+"""
+Kites Automate — Command Line Interface
+
+Main CLI entry points for portfolio updates, headless token renewals,
+status diagnostics, and Google Sheets synchronization.
+"""
+
+from __future__ import annotations
+
 import argparse
+import json
 import logging
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
-# Ensure the local embedded `kites_core` can be imported
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../kites_core")))
-
-from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-from .config import AppSettings, RuntimeContext
-from .sync_state import write_pipeline_state
-from .logging_setup import setup_logging
-from .scheduler.schedule import start_scheduler
-from .portfolio.updater import update_portfolio_once
-from .auth.token_rotator import rotate_all_tokens, get_valid_token
 from .auth.fully_automated_auth import fully_automated_token_renewal, load_credentials_config
+from .auth.token_rotator import get_valid_token, rotate_all_tokens
+from .config import AccountConfig, AppSettings, RuntimeContext
+from .logging_setup import setup_logging
 from .notify.emailer import send_email
+from .portfolio.updater import update_portfolio_once
+from .profiles import find_profiles_file, load_profiles_config
+from .scheduler.schedule import start_scheduler
+from .sheets.client import SheetManager
+from .sync_state import load_pipeline_state, write_pipeline_state
+
+logger = logging.getLogger("kites_automate.cli")
 
 
 def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="kites-automate", description="Kites automation service")
+    parser = argparse.ArgumentParser(
+        prog="kites-automate",
+        description="Automated Zerodha Kite portfolio sync to Google Sheets",
+    )
+    parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        help="Enable debug logging output",
+    )
+
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("run-once", help="Run one portfolio update now")
-    sub.add_parser("run-scheduler", help="Start scheduler for monthly updates")
-    sub.add_parser("rotate-tokens", help="Rotate/refresh tokens now (all accounts or legacy)")
-    sub.add_parser("auto-renew-tokens", help="Fully automated token renewal with browser automation")
-    sub.add_parser("send-test-email", help="Send a test email using configured SMTP settings")
-    sub.add_parser("local-update", help="Invoke local tracker client via factory to update sheets")
+    # run / run-once
+    p_run = sub.add_parser("run", help="Run portfolio sync across configured accounts")
+    p_run.add_argument("--account", "-a", type=str, default=None, help="Update specific account name only")
+
+    p_run_once = sub.add_parser("run-once", help="Alias for 'run' (compatible with cron)")
+    p_run_once.add_argument("--account", "-a", type=str, default=None, help="Update specific account name only")
+
+    # auto-renew-tokens
+    sub.add_parser("auto-renew-tokens", help="Headless Chromium automated login + TOTP token renewal")
+
+    # status
+    sub.add_parser("status", help="Display system status, token expirations, and recent pipeline run state")
+
+    # test-sheets
+    sub.add_parser("test-sheets", help="Verify Google Sheets service account credentials and connectivity")
+
+    # rotate-tokens
+    sub.add_parser("rotate-tokens", help="Rotate/validate tokens for all accounts")
+
+    # send-test-email
+    sub.add_parser("send-test-email", help="Send a test notification email using configured SMTP settings")
+
+    # run-scheduler
+    sub.add_parser("run-scheduler", help="Run in daemon mode with background scheduler")
 
     return parser
 
 
+def handle_status(ctx: RuntimeContext) -> int:
+    """Print status of accounts, tokens, credentials, and last pipeline run."""
+    print("=" * 60)
+    print(" 🪁 Kites Automate — System Diagnostics & Status")
+    print("=" * 60)
+
+    # 1. Profiles
+    profiles_file = find_profiles_file()
+    cfg = load_profiles_config()
+    profiles = cfg.get("profiles", [])
+    print(f"\n📂 Profiles Config: {profiles_file or 'NOT FOUND'} ({len(profiles)} accounts)")
+    for p in profiles:
+        name = p.get("profile_name", "Unknown")
+        key_env = p.get("api_key_env", "")
+        has_key = bool(os.getenv(key_env))
+        print(f"   • {name:15} (API key env '{key_env}': {'✅ SET' if has_key else '❌ MISSING'})")
+
+    # 2. Token Cache Status
+    print("\n🔑 Authentication Tokens (~/.kites/):")
+    for p in profiles:
+        name = p.get("profile_name", "")
+        tok = get_valid_token(ctx, AccountConfig(name=name), allow_rotate=False)
+        if tok:
+            print(f"   • {name:15} ✅ VALID (Length: {len(tok)})")
+        else:
+            print(f"   • {name:15} ❌ EXPIRED OR MISSING")
+
+    # 3. Google Sheets Credentials
+    try:
+        sm = SheetManager()
+        print(f"\n📊 Google Sheets Credentials: ✅ FOUND ({sm.creds_path})")
+    except Exception as exc:
+        print(f"\n📊 Google Sheets Credentials: ❌ ERROR ({exc})")
+
+    # 4. Last Pipeline Run State
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    state = load_pipeline_state(repo_root / "logs")
+    print("\n⏱️  Last Pipeline Run Outcome:")
+    if state:
+        epoch = state.get("epoch_seconds", 0)
+        dt = datetime.fromtimestamp(epoch, tz=ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S %Z")
+        ok = state.get("success", False)
+        print(f"   • Timestamp:   {dt}")
+        print(f"   • Success:     {'✅ YES' if ok else '❌ NO'}")
+        print(f"   • Run Mode:    {state.get('run_mode')}")
+        print(f"   • Token Exit:  {state.get('token_exit')}")
+        print(f"   • Portf Exit:  {state.get('portfolio_exit')}")
+        print(f"   • Agg Exit:    {state.get('aggregate_exit')}")
+    else:
+        print("   • No recorded last_pipeline_state.json found in logs directory.")
+
+    print("\n" + "=" * 60)
+    return 0
+
+
+def handle_test_sheets(ctx: RuntimeContext) -> int:
+    """Validate Google Sheets connection."""
+    try:
+        sm = SheetManager()
+        cfg = load_profiles_config()
+        sheet_name = cfg.get("settings", {}).get("spreadsheet_name", "Portfolio")
+        print(f"Testing access to spreadsheet: '{sheet_name}'...")
+        ss = sm.get_or_create_sheet(sheet_name)
+        print(f"✅ Successfully opened spreadsheet: '{ss.title}' (ID: {ss.id})")
+        return 0
+    except Exception as exc:
+        print(f"❌ Failed to connect to Google Sheets: {exc}")
+        return 1
+
+
 def main() -> int:
-    setup_logging(logging.INFO)
-    # Load .env into os.environ so profiles.json api_key_env / api_secret_env resolve (not only Pydantic fields).
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    load_dotenv(os.path.join(_root, ".env"))
+    # Always load environment variables from root .env
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    load_dotenv(repo_root / ".env")
+
     parser = create_parser()
     args = parser.parse_args()
+
+    # Logging level
+    level = logging.DEBUG if args.debug else logging.INFO
+    setup_logging(level)
 
     settings = AppSettings.load()
     ctx = RuntimeContext(settings=settings)
 
-    if args.command == "run-once":
-        success_count, total_count, _, _ = update_portfolio_once(ctx)
-        # Non-zero exit if any account failed
+    if args.command in ("run", "run-once"):
+        # Single account filter override if specified
+        if getattr(args, "account", None):
+            matched = [a for a in settings.accounts if a.name.lower() == args.account.lower()]
+            if not matched:
+                logger.error("No account matching '%s' found in configuration", args.account)
+                return 1
+            settings.accounts = matched
+
+        success_count, total_count, successes, failures = update_portfolio_once(ctx)
         rc = 0 if success_count == total_count and total_count > 0 else 1
+
         try:
-            log_dir = Path(_root) / "logs"
+            log_dir = repo_root / "logs"
             write_pipeline_state(
                 log_dir,
                 epoch_seconds=int(time.time()),
@@ -67,124 +189,61 @@ def main() -> int:
                 aggregate_exit=rc,
             )
         except OSError:
-            logging.getLogger(__name__).warning("Could not persist last_pipeline_state.json", exc_info=True)
+            logger.warning("Could not persist last_pipeline_state.json", exc_info=True)
+
         return rc
-    if args.command == "run-scheduler":
-        start_scheduler(ctx)
-        return 0
+
+    if args.command == "auto-renew-tokens":
+        try:
+            profiles_config = load_profiles_config()
+            credentials_config = load_credentials_config()
+
+            if not profiles_config:
+                print("❌ Profiles configuration not found. Check profiles.json")
+                return 1
+            if not credentials_config:
+                print("❌ Credentials configuration not found. Check ~/.kites/credentials.json")
+                return 1
+
+            print("🤖 Starting automated headless Chromium token renewal...")
+            results = fully_automated_token_renewal(profiles_config, credentials_config)
+
+            success_count = sum(1 for token in results.values() if token)
+            total_count = len(results)
+
+            if success_count == total_count and total_count > 0:
+                print(f"🎉 All {total_count} access tokens renewed successfully!")
+                return 0
+            else:
+                print(f"⚠️ Renewed {success_count}/{total_count} tokens successfully")
+                return 0 if success_count > 0 else 1
+        except Exception as exc:
+            logger.exception("Automated token renewal encountered a critical error: %s", exc)
+            return 1
+
+    if args.command == "status":
+        return handle_status(ctx)
+
+    if args.command == "test-sheets":
+        return handle_test_sheets(ctx)
+
     if args.command == "rotate-tokens":
         rotate_all_tokens(ctx, token_only=True)
         return 0
-    if args.command == "auto-renew-tokens":
-        # Load profiles config for automated renewal
-        try:
-            import json
-            legacy_path = ctx.settings.legacy.project_path or "."
-            project_root = os.path.abspath(os.path.join(legacy_path, ".."))
-            profiles_path = (
-                os.path.join(project_root, "profiles.json")
-                if os.path.exists(os.path.join(project_root, "profiles.json"))
-                else os.path.join(legacy_path, "profiles.json")
-            )
-            if os.path.exists(profiles_path):
-                with open(profiles_path, 'r') as f:
-                    profiles_config = json.load(f)
-                credentials_config = load_credentials_config()
-                if not credentials_config:
-                    print("❌ Credentials config not found. Create ~/.kites/credentials.json")
-                    return 1
-                
-                print("🤖 Starting fully automated token renewal...")
-                print("⚠️  This will use browser automation and stored credentials")
-                
-                results = fully_automated_token_renewal(profiles_config, credentials_config)
-                
-                success_count = sum(1 for token in results.values() if token)
-                total_count = len(results)
-                
-                if success_count == total_count:
-                    print(f"🎉 All {total_count} tokens renewed automatically!")
-                else:
-                    print(f"⚠️ Renewed {success_count}/{total_count} tokens automatically")
-                
-                return 0 if success_count > 0 else 1
-            else:
-                print(f"❌ Profiles config not found: {profiles_path}")
-                return 1
-        except Exception as exc:
-            print(f"❌ Automated renewal failed: {exc}")
-            return 1
+
     if args.command == "send-test-email":
         ts = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
         template = """
-        <p>This is a test email from kites-automate.</p>
-        <p>Timestamp (IST): {{ ts }}</p>
+        <p>This is a test notification from kites-automate.</p>
+        <p><strong>Timestamp (IST):</strong> {{ ts }}</p>
         """
         send_email(ctx, subject="Kites Automate Test Email", template_str=template, context={"ts": ts})
+        print("✅ Test email sent (check your inbox)")
         return 0
 
-    if args.command == "local-update":
-        # Dynamically load a factory function to construct the local client
-        import importlib
-        import sys as _sys
-        import os as _os
-
-        factory_spec = _os.getenv("KITES_LOCAL_FACTORY")
-        local_path = _os.getenv("KITES_LOCAL_PATH")
-        if not factory_spec:
-            print("❌ KITES_LOCAL_FACTORY not set (expected 'module:function')")
-            return 1
-        if local_path and local_path not in _sys.path:
-            _sys.path.insert(0, local_path)
-        try:
-            module_name, func_name = factory_spec.split(":", 1)
-            mod = importlib.import_module(module_name)
-            factory = getattr(mod, func_name)
-            client = factory()
-        except Exception as exc:
-            print(f"❌ Failed to load factory {factory_spec}: {exc}")
-            return 1
-
-        # Iterate accounts and call client's update using our tokens
-        successes = []
-        failures = []
-        base = ctx.settings
-        accounts = base.accounts or []
-        if not accounts:
-            accounts = []
-        for acct in accounts:
-            try:
-                token = get_valid_token(ctx, acct)
-                if not token:
-                    print(f"⚠️  No token for {acct.name}; skipping")
-                    failures.append(acct.name)
-                    continue
-                # Try common method signatures
-                called = False
-                for meth, kwargs in [
-                    ("update_portfolio", {"token": token, "account": acct.name}),
-                    ("update_portfolio", {"token": token}),
-                    ("update_with_token", {"token": token, "account": acct.name}),
-                ]:
-                    if hasattr(client, meth):
-                        try:
-                            getattr(client, meth)(**kwargs)
-                            successes.append(acct.name)
-                            called = True
-                            break
-                        except TypeError:
-                            continue
-                if not called:
-                    print(f"⚠️  Client has no supported update method for {acct.name}; skipping")
-                    failures.append(acct.name)
-            except Exception as exc:
-                print(f"❌ Local update failed for {acct.name}: {exc}")
-                failures.append(acct.name)
-
-        print(f"✅ Local update done. Success: {len(successes)}; Failures: {len(failures)}")
-        if failures:
-            print("Failed:", ", ".join(failures))
-        return 0 if successes else 1
+    if args.command == "run-scheduler":
+        start_scheduler(ctx)
+        return 0
 
     parser.print_help()
     return 1
