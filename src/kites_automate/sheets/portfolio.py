@@ -50,7 +50,7 @@ GREEN_PNL_FMT = CellFormat(
     horizontalAlignment="RIGHT",
 )
 RED_PNL_FMT = CellFormat(
-    numberFormat=NumberFormat(type="CURRENCY", pattern="-₹#,##0.00"),
+    numberFormat=NumberFormat(type="CURRENCY", pattern="₹#,##0.00"),
     textFormat=TextFormat(bold=True, foregroundColor=Color(0.75, 0.0, 0.0)),
     horizontalAlignment="RIGHT",
 )
