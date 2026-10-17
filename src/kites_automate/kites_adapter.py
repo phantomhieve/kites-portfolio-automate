@@ -33,6 +33,7 @@ class BaseKitesAdapter:
         ctx: RuntimeContext,
         token: str,
         account: Optional[AccountConfig] = None,
+        force_formatting: bool = False,
     ) -> Optional[dict]:
         raise NotImplementedError
 
@@ -60,6 +61,7 @@ class UnifiedKitesAdapter(BaseKitesAdapter):
         ctx: RuntimeContext,
         token: str,
         account: Optional[AccountConfig] = None,
+        force_formatting: bool = False,
     ) -> Optional[dict]:
         """Fetch holdings for the account and update the corresponding Google Sheet tab."""
         account_name = account.name if account else "default"
@@ -114,11 +116,12 @@ class UnifiedKitesAdapter(BaseKitesAdapter):
         portfolio_manager = PortfolioManager(sheet_manager)
         exceptions = matched_profile.get("exception_list", [])
 
-        # Smart update: only formats if sheet hasn't been styled yet
+        # Smart update: only formats if sheet hasn't been styled yet or force_formatting=True
         summary = portfolio_manager.update_sheet_smart(
             worksheet=worksheet,
             kite_client=kite,
             exception_list=exceptions,
+            force_formatting=force_formatting,
         )
 
         logger.info(

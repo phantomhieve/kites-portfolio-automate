@@ -16,12 +16,53 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import gspread
+from gspread_formatting import CellFormat, Color, NumberFormat, TextFormat, batch_updater
 
 from ..utils.helpers import safe_float
 from ..utils.retry import retry_with_backoff
 from .client import SheetManager
 
 logger = logging.getLogger(__name__)
+
+
+# Theme Formats (Light Gray #E6E6E6 palette matching original dashboard template)
+HEADER_FMT = CellFormat(
+    backgroundColor=Color(0.9, 0.9, 0.9),  # #E6E6E6
+    textFormat=TextFormat(bold=True, fontSize=11),
+    horizontalAlignment="LEFT",
+)
+SUBHEADER_FMT = CellFormat(
+    backgroundColor=Color(0.95, 0.95, 0.95),  # #F2F2F2
+    textFormat=TextFormat(bold=True, fontSize=10),
+    horizontalAlignment="LEFT",
+)
+QUANTITY_FMT = CellFormat(
+    numberFormat=NumberFormat(type="NUMBER", pattern="#,##0.###"),
+    horizontalAlignment="RIGHT",
+)
+CURRENCY_FMT = CellFormat(
+    numberFormat=NumberFormat(type="CURRENCY", pattern="₹#,##0.00"),
+    horizontalAlignment="RIGHT",
+)
+GREEN_PNL_FMT = CellFormat(
+    numberFormat=NumberFormat(type="CURRENCY", pattern="₹#,##0.00"),
+    textFormat=TextFormat(bold=True, foregroundColor=Color(0.0, 0.55, 0.0)),
+    horizontalAlignment="RIGHT",
+)
+RED_PNL_FMT = CellFormat(
+    numberFormat=NumberFormat(type="CURRENCY", pattern="-₹#,##0.00"),
+    textFormat=TextFormat(bold=True, foregroundColor=Color(0.75, 0.0, 0.0)),
+    horizontalAlignment="RIGHT",
+)
+SUMMARY_HEADER_FMT = CellFormat(
+    backgroundColor=Color(0.9, 0.9, 0.9),
+    textFormat=TextFormat(bold=True, fontSize=11),
+    horizontalAlignment="LEFT",
+)
+SUMMARY_LABEL_FMT = CellFormat(
+    textFormat=TextFormat(bold=True),
+    horizontalAlignment="LEFT",
+)
 
 
 @dataclass
@@ -267,14 +308,15 @@ class PortfolioManager:
         worksheet: gspread.Worksheet,
         kite_client: Any,
         exception_list: Optional[List[str]] = None,
+        force_formatting: bool = False,
     ) -> PortfolioSummary:
-        """Smart update: updates data, but only formats if not formatted previously."""
+        """Smart update: updates data, but only formats if not formatted previously or force_formatting=True."""
         is_formatted = self._is_formatted(worksheet)
-        if is_formatted:
+        if not force_formatting and is_formatted:
             logger.info("Sheet '%s' already formatted; performing minimal data update.", worksheet.title)
             return self.update_sheet_minimal(worksheet, kite_client, exception_list)
 
-        logger.info("Sheet '%s' requires initial formatting; applying styles and data...", worksheet.title)
+        logger.info("Sheet '%s' applying formatting and data (force=%s)...", worksheet.title, force_formatting)
         summary = self.update_sheet(worksheet, kite_client, exception_list)
         self._mark_as_formatted(worksheet)
         return summary
@@ -370,34 +412,56 @@ class PortfolioManager:
         )
 
     def _apply_sheet_formatting(self, worksheet: gspread.Worksheet, all_rows: List[List[Any]]) -> None:
-        """Apply headers, column widths, currency formats, and conditional colors."""
+        """Apply complete formatting to portfolio sheet via batch_updater (1 atomic API call)."""
         try:
-            widths = {"A": 260, "B": 100, "C": 150, "D": 150, "E": 120}
-            self.sheet_manager.apply_column_widths(worksheet, widths)
+            with batch_updater(worksheet.spreadsheet) as batch:
+                # 1. Column widths
+                widths = [
+                    ("A", 320),  # Symbol / Fund
+                    ("B", 110),  # Quantity / Units / Total Value label
+                    ("C", 150),  # Value (Purchased)
+                    ("D", 150),  # Value (Current)
+                    ("E", 140),  # P&L
+                ]
+                batch.set_column_widths(worksheet, widths)
 
-            # Apply currency format to C, D, E
-            max_row = max(len(all_rows), 50)
-            self.sheet_manager.format_range(worksheet, f"C1:E{max_row}", self.sheet_manager.CURRENCY_FORMAT)
+                # 2. Iterate through all rows and apply formats
+                for idx, row in enumerate(all_rows, start=1):
+                    if not row:
+                        continue
+                    first_cell = str(row[0]).strip()
 
-            # Highlight headers
-            for idx, row in enumerate(all_rows, start=1):
-                if not row:
-                    continue
-                first = str(row[0])
-                if "Stock Holdings" in first:
-                    self.sheet_manager.format_range(worksheet, f"A{idx}:E{idx}", self.sheet_manager.HEADER_BLUE)
-                elif "Index Mutual Funds" in first:
-                    self.sheet_manager.format_range(worksheet, f"A{idx}:E{idx}", self.sheet_manager.HEADER_GREEN)
-                elif "Other Mutual Funds" in first:
-                    self.sheet_manager.format_range(worksheet, f"A{idx}:E{idx}", self.sheet_manager.HEADER_BROWN)
-                elif "Overall Portfolio Summary" in first or "Summary:" in first:
-                    self.sheet_manager.format_range(worksheet, f"A{idx}:B{idx}", self.sheet_manager.SUMMARY_HEADER)
-                elif len(row) >= 5 and isinstance(row[4], (int, float)):
-                    # Format P&L cell (green for positive, red for negative)
-                    pnl_val = float(row[4])
-                    if pnl_val >= 0:
-                        self.sheet_manager.format_range(worksheet, f"E{idx}", self.sheet_manager.GREEN_CELL)
-                    else:
-                        self.sheet_manager.format_range(worksheet, f"E{idx}", self.sheet_manager.RED_CELL)
+                    # Main section headers
+                    if any(h in first_cell for h in ["Stock Holdings", "Index Mutual Funds", "Other Mutual Funds"]):
+                        batch.format_cell_range(worksheet, f"A{idx}:E{idx}", HEADER_FMT)
+                    # Table subheaders (column names)
+                    elif first_cell in ("Symbol", "Fund"):
+                        batch.format_cell_range(worksheet, f"A{idx}:E{idx}", SUBHEADER_FMT)
+                    # Summary block headers
+                    elif any(s in first_cell for s in [
+                        "Summary: Stocks",
+                        "Summary: Index Mutual Funds",
+                        "Summary: Other Mutual Funds",
+                        "Overall Portfolio Summary",
+                    ]):
+                        batch.format_cell_range(worksheet, f"A{idx}:B{idx}", SUMMARY_HEADER_FMT)
+                    # Summary value rows
+                    elif first_cell in ("Total Value", "Total Portfolio Value", "Total Investment"):
+                        batch.format_cell_range(worksheet, f"A{idx}", SUMMARY_LABEL_FMT)
+                        batch.format_cell_range(worksheet, f"B{idx}", CURRENCY_FMT)
+                    elif first_cell == "Total P&L":
+                        batch.format_cell_range(worksheet, f"A{idx}", SUMMARY_LABEL_FMT)
+                        pnl_val = safe_float({"val": row[1]}, "val") if len(row) > 1 else 0.0
+                        fmt = GREEN_PNL_FMT if pnl_val >= 0 else RED_PNL_FMT
+                        batch.format_cell_range(worksheet, f"B{idx}", fmt)
+                    # Data row (Symbol or Fund with 5 columns: [name, qty/units, buy_val, curr_val, pnl])
+                    elif len(row) >= 5 and isinstance(row[2], (int, float)):
+                        batch.format_cell_range(worksheet, f"B{idx}", QUANTITY_FMT)
+                        batch.format_cell_range(worksheet, f"C{idx}:D{idx}", CURRENCY_FMT)
+                        pnl_val = float(row[4])
+                        fmt = GREEN_PNL_FMT if pnl_val >= 0 else RED_PNL_FMT
+                        batch.format_cell_range(worksheet, f"E{idx}", fmt)
+
+            logger.info("Worksheet '%s' formatted successfully in 1 batched request.", worksheet.title)
         except Exception as exc:
-            logger.warning("Formatting error on worksheet '%s': %s", worksheet.title, exc)
+            logger.warning("Formatting error on worksheet '%s': %s", worksheet.title, exc, exc_info=True)

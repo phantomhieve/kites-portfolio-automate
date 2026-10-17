@@ -55,9 +55,11 @@ def create_parser() -> argparse.ArgumentParser:
     # run / run-once
     p_run = sub.add_parser("run", help="Run portfolio sync across configured accounts")
     p_run.add_argument("--account", "-a", type=str, default=None, help="Update specific account name only")
+    p_run.add_argument("--force-format", "-F", action="store_true", help="Force re-applying all formatting and styles to Google Sheets")
 
     p_run_once = sub.add_parser("run-once", help="Alias for 'run' (compatible with cron)")
     p_run_once.add_argument("--account", "-a", type=str, default=None, help="Update specific account name only")
+    p_run_once.add_argument("--force-format", "-F", action="store_true", help="Force re-applying all formatting and styles to Google Sheets")
 
     # auto-renew-tokens
     p_renew = sub.add_parser("auto-renew-tokens", help="Headless Chromium automated login + TOTP token renewal")
@@ -176,7 +178,8 @@ def main() -> int:
                 return 1
             settings.accounts = matched
 
-        success_count, total_count, successes, failures = update_portfolio_once(ctx)
+        force_format = getattr(args, "force_format", False)
+        success_count, total_count, successes, failures = update_portfolio_once(ctx, force_formatting=force_format)
         rc = 0 if success_count == total_count and total_count > 0 else 1
 
         try:
