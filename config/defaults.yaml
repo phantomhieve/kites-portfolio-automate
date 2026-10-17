@@ -22,6 +22,7 @@ email:
   use_tls: true
 
 # Optional: define multiple accounts with overrides
+# Names must match profile_name values in profiles.json (used for Sheets + ~/.kites token files).
 accounts:
   - name: Account1
   - name: Account2

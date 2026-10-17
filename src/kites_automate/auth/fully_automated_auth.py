@@ -62,10 +62,10 @@ def _cleanup_between_profiles(profile_index: int, total_profiles: int, base_paus
         import gc
         gc.collect()
         
-        # Only kill orphaned geckodriver processes (less aggressive)
+        # Kill orphaned driver processes (best-effort).
+        # Note: this is intentionally conservative (chromedriver only) to avoid killing browsers.
         try:
             import subprocess
-            # Only kill geckodriver, not firefox - let it clean up naturally
             subprocess.run(['pkill', '-f', 'chromedriver'], capture_output=True)
         except Exception:
             pass
@@ -187,9 +187,9 @@ class FullyAutomatedKiteAuth:
             
             import subprocess
             
-            # Kill any existing Xvfb processes
+            # Kill any existing Xvfb on :99 (avoid killing unrelated displays)
             try:
-                subprocess.run(['pkill', '-f', 'Xvfb'], capture_output=True)
+                subprocess.run(['pkill', '-f', 'Xvfb :99'], capture_output=True)
                 time.sleep(1)
             except Exception:
                 pass
@@ -322,6 +322,22 @@ class FullyAutomatedKiteAuth:
         chrome_options.add_argument("--disk-cache-size=0")
         chrome_options.add_argument("--media-cache-size=0")
 
+        # Prefer Chromium on servers where google-chrome wrapper may fail (e.g. missing xdg-utils).
+        # For snap installs, /snap/bin/chromium is a snap launcher; point to the real binary inside the snap
+        # to avoid Selenium/ChromeDriver incompatibilities with the launcher.
+        try:
+            for candidate in (
+                "/snap/chromium/current/usr/lib/chromium-browser/chrome",
+                "/snap/chromium/current/usr/lib/chromium-browser/chromium",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+            ):
+                if os.path.exists(candidate):
+                    chrome_options.binary_location = candidate
+                    break
+        except Exception:
+            pass
+
         # Create a unique temporary user data dir for isolation
         self._temp_profile_dir = None
         try:
@@ -332,7 +348,8 @@ class FullyAutomatedKiteAuth:
             self._temp_profile_dir = None
 
         # Try system chromedriver paths
-        for driver_path in ["/usr/bin/chromedriver", "/usr/local/bin/chromedriver", "chromedriver"]:
+        # On Ubuntu with snap Chromium, prefer the snap-provided chromedriver which matches the browser build.
+        for driver_path in ["/snap/bin/chromium.chromedriver", "/usr/bin/chromedriver", "/usr/local/bin/chromedriver", "chromedriver"]:
             # Try up to 2 times per path
             for attempt in range(2):
                 try:
@@ -375,6 +392,7 @@ class FullyAutomatedKiteAuth:
                     if driver_result[0] is not None:
                         logger.info("Chrome webdriver initialized via: %s", driver_path)
                         return driver_result[0]
+                    else:
                         logger.warning("Chromedriver path failed %s: %s (attempt %d)", driver_path, driver_error[0], attempt + 1)
                         if attempt == 0:
                             continue  # Try again
@@ -388,7 +406,9 @@ class FullyAutomatedKiteAuth:
                     else:
                         break  # Move to next path
 
-        # Fallback: use webdriver-manager to download/manage chromedriver with timeout
+        # Fallback: use webdriver-manager to download/manage chromedriver with timeout.
+        # Note: on some servers (esp. snap Chromium), webdriver-manager may download a driver that doesn't work
+        # with the installed browser. If snap chromedriver exists, we should never reach here.
         try:
             from webdriver_manager.chrome import ChromeDriverManager
             logger.info("Attempting chromedriver setup via webdriver-manager")
@@ -417,6 +437,28 @@ class FullyAutomatedKiteAuth:
                 raise Exception(f"Webdriver-manager failed: {manager_error[0]}")
             
             driver_path = manager_result[0]
+            # webdriver-manager has recently returned non-executable paths in some releases
+            # (e.g. THIRD_PARTY_NOTICES.chromedriver). Resolve to the actual chromedriver binary.
+            try:
+                import stat
+                candidate = driver_path
+                base = os.path.basename(candidate)
+                if base not in ("chromedriver", "chromedriver.exe"):
+                    parent = os.path.dirname(candidate)
+                    for name in ("chromedriver", "chromedriver.exe"):
+                        alt = os.path.join(parent, name)
+                        if os.path.exists(alt):
+                            candidate = alt
+                            break
+                # Ensure it is executable if it exists
+                if os.path.exists(candidate):
+                    st = os.stat(candidate)
+                    if not (st.st_mode & stat.S_IXUSR):
+                        os.chmod(candidate, st.st_mode | stat.S_IXUSR)
+                    driver_path = candidate
+            except Exception:
+                # If resolution fails, proceed with original path (will error with details)
+                pass
             service = Service(driver_path, log_output=os.devnull)
             
             # Initialize driver with timeout

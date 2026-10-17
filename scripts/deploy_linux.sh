@@ -34,10 +34,12 @@ ssh "${SSH_TARGET}" << EOF
   sudo apt-get update
   sudo apt-get install -y python3-venv python3-pip chromium-browser chromium-chromedriver
   
-  # Set up Virtual Environment
+  # Set up Virtual Environment (Ubuntu 26.04 defaults to Python 3.14 — use 3.13 from deadsnakes when available)
   cd "${TARGET_DIR}"
+  PYTHON_BIN=\$(command -v python3.13 2>/dev/null || command -v python3)
+  echo "Using Python: \$(\$PYTHON_BIN -V)"
   echo "Setting up Python environment in ${TARGET_DIR}..."
-  python3 -m venv .venv
+  \$PYTHON_BIN -m venv .venv
   source .venv/bin/activate
   pip install --upgrade pip
   pip install -r requirements.txt
