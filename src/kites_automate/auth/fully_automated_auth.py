@@ -878,22 +878,20 @@ def fully_automated_token_renewal(profiles_config: Dict[str, Any], credentials_c
             api_key_env = profile.get('api_key_env')
             api_secret_env = profile.get('api_secret_env')
             
-            if not all([profile_name, api_key_env, api_secret_env]):
-                logger.warning("Incomplete profile config for %s", profile_name)
-                results[profile_name] = None
+            if not profile_name:
                 continue
-            
-            # Get API credentials from environment
-            api_key = os.getenv(api_key_env)
-            api_secret = os.getenv(api_secret_env)
+
+            from ..profiles import resolve_api_credentials
+            api_key, api_secret = resolve_api_credentials(profile_name, profile)
             
             if not all([api_key, api_secret]):
                 logger.warning("Missing API credentials for %s", profile_name)
                 results[profile_name] = None
                 continue
             
-            # Get login credentials
-            creds = credentials_config.get(profile_name.lower(), {})
+            # Get login credentials (supports flat or nested accounts)
+            vault_accounts = credentials_config.get("accounts", credentials_config)
+            creds = vault_accounts.get(profile_name.lower(), {}) if isinstance(vault_accounts, dict) else {}
             username = creds.get('username')
             password = creds.get('password')
             totp_secret = creds.get('totp_secret')

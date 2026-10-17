@@ -22,7 +22,7 @@ def send_email(ctx: RuntimeContext, subject: str, template_str: str, context: Di
     # Basic validation to provide clear guidance instead of connection refused
     if not email_cfg.smtp_host:
         raise ValueError(
-            "SMTP host is not configured. Set SMTP_HOST in environment or update config/defaults.yaml."
+            "SMTP host is not configured. Set SMTP_HOST in environment."
         )
     if not email_cfg.email_from:
         raise ValueError("EMAIL_FROM is not configured. Set EMAIL_FROM in environment or config.")

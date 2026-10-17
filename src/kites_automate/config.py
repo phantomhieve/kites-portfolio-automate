@@ -1,18 +1,16 @@
 """
 Application Configuration & Settings
 
-Loads and validates settings using Pydantic, merging defaults from config/defaults.yaml
-with environment variables loaded from .env.
+Loads and validates settings using Pydantic, deriving values from .env
+and automatically discovering configured accounts from profiles.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
-import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -64,36 +62,21 @@ class AppSettings(BaseSettings):
     accounts: List[AccountConfig] = []
 
     @staticmethod
-    def _read_yaml_defaults(path: str) -> dict:
-        if not os.path.exists(path):
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-
-    @staticmethod
-    def _apply_env_overrides(defaults: dict) -> dict:
-        cfg = {**defaults}
+    def _apply_env_overrides(base_cfg: dict) -> dict:
+        cfg = {**base_cfg}
         cfg.setdefault("kites", {})
         cfg.setdefault("schedule", {})
         cfg.setdefault("email", {})
         cfg.setdefault("accounts", cfg.get("accounts", []))
 
         env = os.environ
-        # Kites flat keys
+        # Kites keys
         if env.get("KITES_BASE_URL"):
             cfg["kites"]["base_url"] = env.get("KITES_BASE_URL")
-        if env.get("KITES_USERNAME"):
-            cfg["kites"]["username"] = env.get("KITES_USERNAME")
-        if env.get("KITES_PASSWORD"):
-            cfg["kites"]["password"] = env.get("KITES_PASSWORD")
         if env.get("KITES_API_KEY"):
             cfg["kites"]["api_key"] = env.get("KITES_API_KEY")
-        if env.get("KITES_CLIENT_ID"):
-            cfg["kites"]["client_id"] = env.get("KITES_CLIENT_ID")
-        if env.get("KITES_CLIENT_SECRET"):
-            cfg["kites"]["client_secret"] = env.get("KITES_CLIENT_SECRET")
 
-        # Schedule flat keys
+        # Schedule keys
         if env.get("SCHEDULE_DAY_OF_MONTH"):
             cfg["schedule"]["day_of_month"] = int(env.get("SCHEDULE_DAY_OF_MONTH"))
         if env.get("SCHEDULE_HOUR"):
@@ -103,7 +86,7 @@ class AppSettings(BaseSettings):
         if env.get("TIMEZONE"):
             cfg["schedule"]["timezone"] = env.get("TIMEZONE")
 
-        # Email flat keys
+        # Email keys
         if env.get("SMTP_HOST") is not None:
             cfg["email"]["smtp_host"] = env.get("SMTP_HOST")
         if env.get("SMTP_PORT") is not None:
@@ -133,10 +116,20 @@ class AppSettings(BaseSettings):
         return cfg
 
     @classmethod
-    def load(cls, defaults_path: str = "config/defaults.yaml") -> "AppSettings":
+    def load(cls, defaults_path: Optional[str] = None) -> "AppSettings":
         load_dotenv(override=False)
-        defaults = cls._read_yaml_defaults(defaults_path)
-        merged = cls._apply_env_overrides(defaults)
+        merged = cls._apply_env_overrides({})
+
+        # Automatically discover accounts from profiles if not manually passed
+        if not merged.get("accounts"):
+            from .profiles import load_profiles_config
+            profiles_cfg = load_profiles_config()
+            merged["accounts"] = [
+                {"name": p["profile_name"]}
+                for p in profiles_cfg.get("profiles", [])
+                if p.get("profile_name")
+            ]
+
         sanitized = cls._sanitize_config(merged)
         return cls.model_validate(sanitized)
 

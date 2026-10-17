@@ -72,20 +72,16 @@ class UnifiedKitesAdapter(BaseKitesAdapter):
             logger.error("No profile configuration found in profiles.json for '%s'", account_name)
             raise RuntimeError(f"No profile found for account: {account_name}")
 
-        # Resolve credentials from environment
-        key_env = matched_profile.get("api_key_env", "")
-        secret_env = matched_profile.get("api_secret_env", "")
-        api_key = os.getenv(key_env)
-        api_secret = os.getenv(secret_env)
+        # Resolve credentials (from ~/.kites vault or .env)
+        from .profiles import resolve_api_credentials
+        api_key, api_secret = resolve_api_credentials(account_name, matched_profile)
 
         if not api_key or not api_secret:
             logger.error(
-                "Missing API credentials in environment for '%s' (vars: %s, %s)",
+                "Missing API credentials for '%s'. Configure in ~/.kites/credentials.json or .env",
                 account_name,
-                key_env,
-                secret_env,
             )
-            raise RuntimeError(f"Missing API credentials for {account_name} ({key_env}, {secret_env})")
+            raise RuntimeError(f"Missing API credentials for {account_name}")
 
         logger.info("Using API key for %s (len=%d)", account_name, len(api_key))
         if not token:

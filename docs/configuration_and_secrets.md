@@ -18,18 +18,19 @@ This document defines the strict, defense-in-depth architecture used by `kites-a
 
 ```mermaid
 graph TD
-    A["~/.kites/credentials.json (chmod 600)"] -->|"Headless Chromium Login + TOTP"| B["src.kites_automate.auth"]
-    C[".env (API Keys, Secrets, SMTP)"] -->|"Environment Injection"| D["src.kites_automate.config"]
-    E["profiles.json (Account Mapping)"] -->|"Account & Sheet Mapping"| F["src.kites_automate.profiles"]
-    G["credentials.json (Google SA Key)"] -->|"Google Sheets Authorization"| H["src.kites_automate.sheets"]
-    I["config/defaults.yaml"] -->|"Baseline Fallbacks"| D
+    A["~/.kites/credentials.json (chmod 600)<br>Unified Vault: Passwords + TOTP + API Keys"] -->|"Direct Resolution"| B["src.kites_automate.profiles"]
+    C[".env (Minimal Runtime Flags, SMTP)"] -->|"Runtime Settings"| D["src.kites_automate.config"]
+    E["~/.kites/google_service_account.json (chmod 600)"] -->|"Google Sheets Auth"| F["src.kites_automate.sheets"]
+    G["profiles.json (Optional Overrides)"] -.->|"Auto-discovered if omitted"| B
 ```
 
 ---
 
 ### Layer 1: Broker Login Credentials (`~/.kites/credentials.json`)
 
-Used exclusively by `fully_automated_auth.py` for headless Chromium automated login and TOTP token renewal.
+### Layer 1: Unified Credentials Vault (`~/.kites/credentials.json`)
+
+Used by both automated headless authentication and the Kite Connect SDK. Co-locates all account credentials (login, TOTP, and API keys) outside of version control.
 
 - **Path**: `~/.kites/credentials.json`
 - **Permissions**: `chmod 700 ~/.kites && chmod 600 ~/.kites/credentials.json`
@@ -40,12 +41,16 @@ Used exclusively by `fully_automated_auth.py` for headless Chromium automated lo
   "account1": {
     "username": "your_account1_zerodha_user_id",
     "password": "your_account1_zerodha_password",
-    "totp_secret": "your_account1_totp_secret_from_authenticator_app"
+    "totp_secret": "your_account1_totp_secret_from_authenticator_app",
+    "api_key": "your_account1_kite_api_key",
+    "api_secret": "your_account1_kite_api_secret"
   },
   "account2": {
     "username": "your_account2_zerodha_user_id",
     "password": "your_account2_zerodha_password",
-    "totp_secret": "your_account2_totp_secret_from_authenticator_app"
+    "totp_secret": "your_account2_totp_secret_from_authenticator_app",
+    "api_key": "your_account2_kite_api_key",
+    "api_secret": "your_account2_kite_api_secret"
   }
 }
 ```
@@ -120,45 +125,25 @@ Maps account names to environment variable keys and Google Sheet settings.
 
 ---
 
-### Layer 4: Google Cloud Service Account (`credentials.json`)
+### Layer 4: Google Cloud Service Account
 
 Grants write access to the target Google Spreadsheet.
 
 - **Candidate Search Paths**:
-  1. `./credentials.json`
-  2. `~/.kites/credentials.json`
+  1. `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+  2. `~/.kites/google_service_account.json` (chmod 600)
+  3. `~/.kites/sheets_credentials.json` (chmod 600)
+  4. `./credentials.json` (repository root, git-ignored)
 - **Scopes Required**:
   - `https://spreadsheets.google.com/feeds`
   - `https://www.googleapis.com/auth/drive`
-- **Spreadsheet Sharing**: Share the destination Google Sheet with the `client_email` found inside `credentials.json` with **Editor** role.
+- **Spreadsheet Sharing**: Share the destination Google Sheet with the `client_email` found inside the service account key with **Editor** role.
 
 ---
 
-### Layer 5: Non-Sensitive Defaults (`config/defaults.yaml`)
+### Layer 5: Code-Level Defaults (`src/kites_automate/config.py`)
 
-Contains non-sensitive application defaults committed to version control:
-
-```yaml
-schedule:
-  day_of_month: 15
-  hour: 21
-  minute: 0
-  timezone: "Asia/Kolkata"
-
-email:
-  smtp_host: ""
-  smtp_port: 587
-  smtp_username: ""
-  smtp_password: ""
-  email_from: ""
-  email_to: ""
-  use_tls: true
-
-accounts:
-  - name: Account1
-  - name: Account2
-  - name: Account3
-```
+Eliminated legacy `config/defaults.yaml`. All non-sensitive fallbacks (timezone, schedule, retry policies) are strictly typed using Pydantic models with sensible defaults (`Asia/Kolkata`, smart formatting, etc.) and auto-discovers configured accounts from `~/.kites/credentials.json` or `profiles.json`.
 
 ---
 

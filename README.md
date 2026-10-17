@@ -49,7 +49,6 @@ kites-automate/
 │   └── utils/
 │       ├── helpers.py             # Safe float parsing and currency formatting
 │       └── retry.py               # Exponential backoff retry decorator
-├── config/defaults.yaml           # Account defaults and configuration
 ├── scripts/
 │   ├── run_scheduled.sh           # Main cron pipeline script
 │   ├── deploy_linux.sh            # Safe rsync deployment to phantomhive server
