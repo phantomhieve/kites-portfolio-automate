@@ -91,7 +91,11 @@ def _write_token_to_disk(path: str, token: Token) -> None:
     os.replace(tmp, path)
 
 
-def get_valid_token(ctx: RuntimeContext, account: Optional[AccountConfig] = None) -> Optional[str]:
+def get_valid_token(
+    ctx: RuntimeContext,
+    account: Optional[AccountConfig] = None,
+    allow_rotate: bool = True,
+) -> Optional[str]:
     name = account.name if account else None
     path = _token_path(name)
     token = _read_token_from_disk(path)
@@ -102,6 +106,9 @@ def get_valid_token(ctx: RuntimeContext, account: Optional[AccountConfig] = None
     automated = _read_automated_token(name)
     if automated and not automated.is_expired:
         return automated.access_token
+
+    if not allow_rotate:
+        return None
 
     new_token = rotate_token(ctx, account)
     if new_token:
