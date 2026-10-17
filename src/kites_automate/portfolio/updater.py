@@ -31,6 +31,7 @@ def _update_single(
     ctx: RuntimeContext,
     effective_settings: AppSettings,
     account: Optional[AccountConfig],
+    force_formatting: bool = False,
 ) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """Execute update for a single account. Returns (success, adapter_result)."""
     local_ctx = RuntimeContext(settings=effective_settings)
@@ -43,7 +44,7 @@ def _update_single(
             return False, None
 
         adapter = get_adapter(local_ctx)
-        result = adapter.update_portfolio(local_ctx, token, account)
+        result = adapter.update_portfolio(local_ctx, token, account, force_formatting=force_formatting)
 
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S %Z")
         logger.info("Successfully completed portfolio update for '%s' at %s", account_name, ist_now)
@@ -55,7 +56,7 @@ def _update_single(
         return False, None
 
 
-def update_portfolio_once(ctx: RuntimeContext) -> Tuple[int, int, List[str], List[str]]:
+def update_portfolio_once(ctx: RuntimeContext, force_formatting: bool = False) -> Tuple[int, int, List[str], List[str]]:
     """
     Run portfolio update across all configured accounts, then update the Summary sheet.
     Returns: (success_count, total_count, successful_names, failed_names)
@@ -82,7 +83,7 @@ def update_portfolio_once(ctx: RuntimeContext) -> Tuple[int, int, List[str], Lis
 
         eff = AppSettings.build_settings_for_account(base, acct) if acct else base
         try:
-            ok, result = _update_single(ctx, eff, acct)
+            ok, result = _update_single(ctx, eff, acct, force_formatting=force_formatting)
             if ok and result:
                 success_count += 1
                 successes.append(account_name)
@@ -115,7 +116,7 @@ def update_portfolio_once(ctx: RuntimeContext) -> Tuple[int, int, List[str], Lis
             time.sleep(3)
             summary_mgr = SummaryManager(last_sheet_manager)
             summary_ws = last_sheet_manager.get_or_create_worksheet(last_spreadsheet, last_summary_sheet_name)
-            overall = summary_mgr.update_summary_sheet(summary_ws, portfolio_summaries, force_formatting=False)
+            overall = summary_mgr.update_summary_sheet(summary_ws, portfolio_summaries, force_formatting=force_formatting)
             if overall:
                 logger.info(
                     "Summary sheet updated successfully! Total Portfolio Value: ₹%.2f, Total P&L: ₹%.2f (%.2f%%)",
