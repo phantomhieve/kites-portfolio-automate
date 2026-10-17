@@ -5,7 +5,7 @@
 
 - **Authentication Automation (`src/kites_automate/auth/`)**: Headless Chromium + TOTP automated login, OAuth redirect interception (`webhook_server.py`), and access token rotation (`token_rotator.py` saving to `~/.kites/`).
 - **Portfolio Ingestion & Sync (`src/kites_automate/portfolio/`, `src/kites_automate/kites_adapter.py`)**: Fetches equity holdings and mutual funds across configured Zerodha accounts and synchronizes them to Google Sheets.
-- **Sheets IO & Aggregation (`kites_core/kites/sheets/`)**: `SheetManager` writes individual profile tabs with smart formatting cache (`.portfolio_formatting_state.json`), while `SummaryManager` computes consolidated portfolio totals.
+- **Sheets IO & Aggregation (`src/kites_automate/sheets/`)**: `SheetManager` writes individual profile tabs with smart formatting cache (`.portfolio_formatting_state.json`), while `SummaryManager` computes consolidated portfolio totals.
 - **Scheduled Pipeline & Metrics (`scripts/run_scheduled.sh`, `scripts/export_kites_sync_metrics.py`, `src/kites_automate/sync_state.py`)**: Crontab-triggered execution, log rotation, atomic outcome state tracking (`last_pipeline_state.json`), and Prometheus node_exporter textfile metrics.
 
 ---

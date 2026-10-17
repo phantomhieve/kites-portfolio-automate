@@ -790,49 +790,21 @@ class FullyAutomatedKiteAuth:
                 self._aggressive_cleanup()
     
     def _generate_access_token(self, request_token: str) -> Optional[str]:
-        """Generate access token from request token using kiteconnect."""
+        """Generate access token from request token directly in-process."""
         try:
-            # Import kiteconnect in the legacy project's venv
-            python_code = f"""
-import sys
-import os
+            from kiteconnect import KiteConnect
 
-# kiteconnect is now installed in current venv
-
-from kiteconnect import KiteConnect
-
-# Initialize KiteConnect
-kite = KiteConnect(api_key="{self.api_key}")
-
-# Generate session
-try:
-    data = kite.generate_session("{request_token}", api_secret="{self.api_secret}")
-    print(data["access_token"])
-except Exception as e:
-    print(f"ERROR: {{e}}")
-    sys.exit(1)
-"""
-            
-            # Use current venv (has kiteconnect installed)
-            import sys
-            current_python = sys.executable
-            
-            result = subprocess.run(
-                [current_python, "-c", python_code],
-                cwd=os.getcwd(),
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                access_token = result.stdout.strip()
-                if access_token and not access_token.startswith("ERROR:"):
-                    return access_token
-                else:
-                    logger.error("Access token generation failed: %s", result.stdout)
-            else:
-                logger.error("Access token generation failed: %s", result.stderr)
+            kite = KiteConnect(api_key=self.api_key)
+            data = kite.generate_session(request_token, api_secret=self.api_secret)
+            access_token = data.get("access_token")
+            if access_token:
+                logger.info("Successfully generated access token for %s", self.profile_name)
+                return access_token
+            logger.error("No access token returned in session response for %s", self.profile_name)
+            return None
+        except Exception as exc:
+            logger.error("Access token generation failed for %s: %s", self.profile_name, exc)
+            return None
                 
         except Exception as exc:
             logger.error("Error generating access token: %s", exc)
@@ -964,20 +936,20 @@ def load_credentials_config(config_path: str = None) -> Dict[str, Any]:
     
     Expected format:
     {
-        "huf": {
-            "username": "your_huf_user_id",
-            "password": "your_huf_password", 
-            "totp_secret": "your_huf_totp_secret"
+        "account1": {
+            "username": "your_account1_user_id",
+            "password": "your_account1_password", 
+            "totp_secret": "your_account1_totp_secret"
         },
-        "kanika": {
-            "username": "your_kanika_user_id",
-            "password": "your_kanika_password",
-            "totp_secret": "your_kanika_totp_secret"
+        "account2": {
+            "username": "your_account2_user_id",
+            "password": "your_account2_password",
+            "totp_secret": "your_account2_totp_secret"
         },
-        "atul": {
-            "username": "your_atul_user_id", 
-            "password": "your_atul_password",
-            "totp_secret": "your_atul_totp_secret"
+        "account3": {
+            "username": "your_account3_user_id", 
+            "password": "your_account3_password",
+            "totp_secret": "your_account3_totp_secret"
         }
     }
     """

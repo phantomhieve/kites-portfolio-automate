@@ -1,16 +1,10 @@
-kites:
-  base_url: ""
-  username: ""
-  password: ""
-  api_key: ""
-  client_id: ""
-  client_secret: ""
+# Default settings for kites-automate
 
 schedule:
   day_of_month: 15
   hour: 6
   minute: 0
-  timezone: "UTC"
+  timezone: "Asia/Kolkata"
 
 email:
   smtp_host: ""
@@ -21,16 +15,8 @@ email:
   email_to: ""
   use_tls: true
 
-# Optional: define multiple accounts with overrides
-# Names must match profile_name values in profiles.json (used for Sheets + ~/.kites token files).
+# Configured accounts (names match profile_name values in profiles.json)
 accounts:
-  - name: HUF
-  - name: Kanika
-  - name: Atul
-
-legacy:
-  enabled: false
-  project_path: "./kites_core"
-  module_name: "main"
-  mode: "smart"  # smart|minimal|force_format|show_status|reset_state
-  env_file: "./kites_core/.env"
+  - name: Account1
+  - name: Account2
+  - name: Account3
